@@ -407,7 +407,7 @@ export default function LandingPage() {
         <div className="absolute top-5 right-5 z-20">
           <button
             onClick={() => navigate("/signup")}
-            className="text-xs font-medium px-4 py-2 rounded-full transition-all duration-150 hover:scale-[1.03] active:scale-[0.97]"
+            className="text-sm font-medium px-6 py-3 rounded-full transition-all duration-150 hover:scale-[1.03] active:scale-[0.97]"
             style={{
               background: "rgba(255,255,255,0.18)",
               border: "1px solid rgba(255,255,255,0.35)",
