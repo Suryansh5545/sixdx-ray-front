@@ -585,6 +585,7 @@ function ClassPreviewModal({
               className="w-full flex items-center justify-center rounded-[20px] overflow-hidden"
               style={{
                 minHeight: 420,
+                height: preview.mediaType === "image" ? "68vh" : undefined,
                 background: "#000",
                 border: "1px solid rgba(255,255,255,0.06)",
               }}
@@ -665,11 +666,11 @@ function ClassPreviewModal({
               )}
 
               {!preview.loading && !preview.error && preview.mediaUrl && preview.mediaType === "image" && (
-                <div className="relative inline-block max-w-full">
+                <div className="relative w-full h-full">
                   <img
                     src={preview.mediaUrl}
                     alt={`${preview.label} preview`}
-                    className="block max-w-full max-h-[68vh] object-contain"
+                    className="block w-full h-full object-fill"
                   />
                   {currentMoment && currentMoment.frameWidth > 0 && currentMoment.frameHeight > 0 && (
                     <svg
