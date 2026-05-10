@@ -6,7 +6,6 @@ import {
   analyzeRecording,
   DEFAULT_RECORDING_ANALYSIS_CLASSES,
   downloadRecordingFile,
-  fetchAiJobPreview,
   fetchJobsStatus,
   fetchRecordingAnalysisJob,
   fetchSupportedAiClasses,
@@ -71,7 +70,7 @@ interface ClassPreviewState {
   subJobId: string | null;
   moments: DetectionMoment[];
   selectedMomentIndex: number;
-  mediaType: "video" | "image" | null;
+  mediaType: "video" | null;
   mediaUrl: string | null;
   mediaFilename: string | null;
   loading: boolean;
@@ -323,6 +322,20 @@ function getClassDetectionMoments(job: RecordingAnalysisJob, label: string): Det
     });
 }
 
+function getMomentFrameIndex(moment: DetectionMoment): number | null {
+  return moment.events.find((event) => event.frame?.index != null)?.frame?.index ?? null;
+}
+
+function extractFolderNameFromSourceName(sourceName: string | null): string | null {
+  if (!sourceName) return null;
+
+  const prefix = "recording-";
+  if (!sourceName.startsWith(prefix)) return null;
+
+  const folderName = sourceName.slice(prefix.length).trim();
+  return folderName.length > 0 ? folderName : null;
+}
+
 function downloadBlob(blob: Blob, filename: string) {
   const objectUrl = window.URL.createObjectURL(blob);
   const anchor = document.createElement("a");
@@ -486,6 +499,9 @@ function ClassPreviewModal({
   onSelectMoment: (index: number) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [frameLoading, setFrameLoading] = useState(false);
+  const [frameError, setFrameError] = useState<string | null>(null);
   const currentMoment =
     preview.selectedMomentIndex >= 0 ? preview.moments[preview.selectedMomentIndex] ?? null : null;
 
@@ -501,23 +517,127 @@ function ClassPreviewModal({
   }, [onClose]);
 
   useEffect(() => {
-    if (preview.mediaType !== "video" || !currentMoment || !videoRef.current) return;
-
-    const targetTime = Math.max(0, (currentMoment.sourceTimestampSec ?? 0) - 0.05);
-    const video = videoRef.current;
-
-    function seekToMoment() {
-      video.currentTime = targetTime;
-      void video.pause();
-    }
-
-    if (video.readyState >= 1) {
-      seekToMoment();
+    if (
+      preview.mediaType !== "video" ||
+      !preview.mediaUrl ||
+      !currentMoment ||
+      !videoRef.current ||
+      !canvasRef.current
+    ) {
+      setFrameLoading(false);
+      setFrameError(null);
       return;
     }
 
-    video.addEventListener("loadedmetadata", seekToMoment, { once: true });
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      setFrameError("Could not prepare a frame canvas for this preview.");
+      setFrameLoading(false);
+      return;
+    }
+
+    const moment = currentMoment;
+    const drawingContext = context;
+    let cancelled = false;
+
+    setFrameLoading(true);
+    setFrameError(null);
+
+    function drawCurrentFrame() {
+      if (cancelled) return;
+
+      const width = moment.frameWidth > 0 ? moment.frameWidth : video.videoWidth;
+      const height = moment.frameHeight > 0 ? moment.frameHeight : video.videoHeight;
+
+      if (width <= 0 || height <= 0) {
+        setFrameError("Frame dimensions were not available for this saved moment.");
+        setFrameLoading(false);
+        return;
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      drawingContext.clearRect(0, 0, width, height);
+      drawingContext.drawImage(video, 0, 0, width, height);
+
+      moment.events.forEach((event) => {
+        if (!event.bbox) return;
+
+        const boxWidth = Math.max(0, event.bbox.x2 - event.bbox.x1);
+        const boxHeight = Math.max(0, event.bbox.y2 - event.bbox.y1);
+        drawingContext.fillStyle = "rgba(239,68,68,0.12)";
+        drawingContext.strokeStyle = "#ef4444";
+        drawingContext.lineWidth = 4;
+        drawingContext.fillRect(event.bbox.x1, event.bbox.y1, boxWidth, boxHeight);
+        drawingContext.strokeRect(event.bbox.x1, event.bbox.y1, boxWidth, boxHeight);
+
+        const text = `${formatClassLabel(event.label)}${
+          event.confidence != null ? ` ${(event.confidence * 100).toFixed(1)}%` : ""
+        }`;
+        drawingContext.font = "600 20px 'DM Sans', sans-serif";
+        drawingContext.textBaseline = "top";
+        const textX = event.bbox.x1;
+        const textY = Math.max(6, event.bbox.y1 - 28);
+        const textWidth = drawingContext.measureText(text).width + 16;
+        const textHeight = 26;
+
+        drawingContext.fillStyle = "rgba(0,0,0,0.72)";
+        drawingContext.fillRect(textX, textY, textWidth, textHeight);
+        drawingContext.fillStyle = "#ffffff";
+        drawingContext.fillText(text, textX + 8, textY + 4);
+      });
+
+      setFrameLoading(false);
+    }
+
+    function seekToMoment() {
+      if (moment.sourceTimestampSec == null) {
+        setFrameError(
+          "This saved detection does not include a source timestamp, so the frame cannot be reconstructed from the original recording.",
+        );
+        setFrameLoading(false);
+        return;
+      }
+
+      const duration = Number.isFinite(video.duration) ? video.duration : 0;
+      const targetTime =
+        duration > 0
+          ? Math.min(
+              Math.max(moment.sourceTimestampSec, 0),
+              Math.max(duration - 0.001, 0),
+            )
+          : Math.max(moment.sourceTimestampSec, 0);
+
+      void video.pause();
+      video.currentTime = targetTime;
+    }
+
+    function handleSeeked() {
+      drawCurrentFrame();
+    }
+
+    function handleVideoError() {
+      if (cancelled) return;
+      setFrameError("Failed to decode the selected moment from the source recording.");
+      setFrameLoading(false);
+    }
+
+    video.addEventListener("seeked", handleSeeked);
+    video.addEventListener("error", handleVideoError);
+
+    if (video.readyState >= 1) {
+      seekToMoment();
+    } else {
+      video.addEventListener("loadedmetadata", seekToMoment, { once: true });
+    }
+
     return () => {
+      cancelled = true;
+      video.removeEventListener("seeked", handleSeeked);
+      video.removeEventListener("error", handleVideoError);
       video.removeEventListener("loadedmetadata", seekToMoment);
     };
   }, [currentMoment, preview.mediaType, preview.mediaUrl]);
@@ -585,7 +705,7 @@ function ClassPreviewModal({
               className="w-full flex items-center justify-center rounded-[20px] overflow-hidden"
               style={{
                 minHeight: 420,
-                height: preview.mediaType === "image" ? "68vh" : undefined,
+                height: "68vh",
                 background: "#000",
                 border: "1px solid rgba(255,255,255,0.06)",
               }}
@@ -617,102 +737,78 @@ function ClassPreviewModal({
               )}
 
               {!preview.loading && !preview.error && preview.mediaUrl && preview.mediaType === "video" && (
-                <div className="relative inline-block max-w-full">
+                <div className="relative flex w-full h-full items-center justify-center">
                   <video
                     ref={videoRef}
                     src={preview.mediaUrl}
-                    controls
-                    className="block max-w-full max-h-[68vh]"
+                    preload="auto"
+                    muted
+                    playsInline
+                    className="hidden"
                   />
-                  {currentMoment && currentMoment.frameWidth > 0 && currentMoment.frameHeight > 0 && (
-                    <svg
-                      className="absolute inset-0 w-full h-full pointer-events-none"
-                      viewBox={`0 0 ${currentMoment.frameWidth} ${currentMoment.frameHeight}`}
-                      preserveAspectRatio="none"
-                    >
-                      {currentMoment.events.map((event, index) => (
-                        event.bbox ? (
-                          <g key={`${currentMoment.id}-${index}`}>
-                            <rect
-                              x={event.bbox.x1}
-                              y={event.bbox.y1}
-                              width={Math.max(0, event.bbox.x2 - event.bbox.x1)}
-                              height={Math.max(0, event.bbox.y2 - event.bbox.y1)}
-                              fill="rgba(239,68,68,0.1)"
-                              stroke="#ef4444"
-                              strokeWidth="4"
-                            />
-                            <text
-                              x={event.bbox.x1}
-                              y={Math.max(20, event.bbox.y1 - 8)}
-                              fill="#ffffff"
-                              fontSize="20"
-                              fontWeight="600"
-                              stroke="rgba(0,0,0,0.35)"
-                              strokeWidth="1"
-                              paintOrder="stroke"
-                            >
-                              {formatClassLabel(event.label)}
-                              {event.confidence != null
-                                ? ` ${(event.confidence * 100).toFixed(1)}%`
-                                : ""}
-                            </text>
-                          </g>
-                        ) : null
-                      ))}
-                    </svg>
+                  {!frameError && (
+                    <canvas
+                      ref={canvasRef}
+                      className="block max-w-full"
+                      style={{ width: "100%", height: "auto", maxHeight: "68vh" }}
+                    />
                   )}
-                </div>
-              )}
-
-              {!preview.loading && !preview.error && preview.mediaUrl && preview.mediaType === "image" && (
-                <div className="relative w-full h-full">
-                  <img
-                    src={preview.mediaUrl}
-                    alt={`${preview.label} preview`}
-                    className="block w-full h-full object-fill"
-                  />
-                  {currentMoment && currentMoment.frameWidth > 0 && currentMoment.frameHeight > 0 && (
-                    <svg
-                      className="absolute inset-0 w-full h-full pointer-events-none"
-                      viewBox={`0 0 ${currentMoment.frameWidth} ${currentMoment.frameHeight}`}
-                      preserveAspectRatio="none"
-                    >
-                      {currentMoment.events.map((event, index) => (
-                        event.bbox ? (
-                          <g key={`${currentMoment.id}-image-${index}`}>
-                            <rect
-                              x={event.bbox.x1}
-                              y={event.bbox.y1}
-                              width={Math.max(0, event.bbox.x2 - event.bbox.x1)}
-                              height={Math.max(0, event.bbox.y2 - event.bbox.y1)}
-                              fill="rgba(239,68,68,0.1)"
-                              stroke="#ef4444"
-                              strokeWidth="4"
-                            />
-                            <text
-                              x={event.bbox.x1}
-                              y={Math.max(20, event.bbox.y1 - 8)}
-                              fill="#ffffff"
-                              fontSize="20"
-                              fontWeight="600"
-                              stroke="rgba(0,0,0,0.35)"
-                              strokeWidth="1"
-                              paintOrder="stroke"
-                            >
-                              {formatClassLabel(event.label)}
-                              {event.confidence != null
-                                ? ` ${(event.confidence * 100).toFixed(1)}%`
-                                : ""}
-                            </text>
-                          </g>
-                        ) : null
-                      ))}
-                    </svg>
+                  {frameLoading && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
+                      <div
+                        style={{
+                          width: 40,
+                          height: 40,
+                          border: "2px solid rgba(79,179,255,0.15)",
+                          borderTopColor: "#4fb3ff",
+                          borderRadius: "50%",
+                          animation: "spin 0.85s linear infinite",
+                        }}
+                      />
+                      <p className="text-sm" style={{ color: "rgba(255,255,255,0.42)" }}>
+                        Extracting the saved frame from the recording...
+                      </p>
+                    </div>
+                  )}
+                  {frameError && (
+                    <div className="max-w-md px-6 text-center">
+                      <p className="text-sm" style={{ color: "rgba(255,170,170,0.92)" }}>
+                        {frameError}
+                      </p>
+                    </div>
                   )}
                 </div>
               )}
             </div>
+
+            {currentMoment && (
+              <div className="flex flex-wrap gap-2 mt-3">
+                {getMomentFrameIndex(currentMoment) != null && (
+                  <span
+                    className="px-3 py-1 rounded-full text-[11px]"
+                    style={{
+                      background: "rgba(79,179,255,0.12)",
+                      border: "1px solid rgba(79,179,255,0.24)",
+                      color: "#90caff",
+                    }}
+                  >
+                    Frame {getMomentFrameIndex(currentMoment)}
+                  </span>
+                )}
+                {currentMoment.sourceTimestampSec != null && (
+                  <span
+                    className="px-3 py-1 rounded-full text-[11px]"
+                    style={{
+                      background: "rgba(255,255,255,0.06)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      color: "rgba(255,255,255,0.76)",
+                    }}
+                  >
+                    {currentMoment.sourceTimestampSec.toFixed(2)}s
+                  </span>
+                )}
+              </div>
+            )}
 
             {preview.note && (
               <p className="text-xs mt-3" style={{ color: "rgba(255,255,255,0.42)" }}>
@@ -765,6 +861,14 @@ function ClassPreviewModal({
                       {moment.events.length} bbox{moment.events.length === 1 ? "" : "es"} · strongest{" "}
                       {(strongestConfidence * 100).toFixed(1)}%
                     </p>
+                    {getMomentFrameIndex(moment) != null && (
+                      <p
+                        className="text-[11px] mt-2"
+                        style={{ color: "rgba(79,179,255,0.68)", fontFamily: "monospace" }}
+                      >
+                        frame {getMomentFrameIndex(moment)}
+                      </p>
+                    )}
                     {moment.events.map((event, eventIndex) => (
                       <p
                         key={`${moment.id}-${eventIndex}`}
@@ -1584,19 +1688,45 @@ export default function RecordingPage() {
     }));
   }
 
+  async function resolveRecordingForJob(job: RecordingAnalysisJob): Promise<RecordingListItem | null> {
+    const existingMatch =
+      recordings.find((recording) => recording.id === job.recordingDetailId) ?? null;
+    if (existingMatch) return existingMatch;
+
+    const folderName = extractFolderNameFromSourceName(job.sourceName);
+    if (!folderName) return null;
+
+    for (const root of ROOT_OPTIONS.map((option) => option.value)) {
+      try {
+        const response = await listRecordings({
+          recordingRoot: root,
+          folderName,
+          limit: 20,
+        });
+        const resolved =
+          response.items.find((recording) => recording.id === job.recordingDetailId) ??
+          response.items[0] ??
+          null;
+        if (resolved) return resolved;
+      } catch {
+        // Ignore lookup failures here and keep trying the next root.
+      }
+    }
+
+    return null;
+  }
+
   async function openClassPreview(
     job: RecordingAnalysisJob,
     label: string,
     subJobId: string | null,
   ) {
     const moments = getClassDetectionMoments(job, label);
-    const matchedRecording =
-      recordings.find((recording) => recording.id === job.recordingDetailId) ?? null;
 
     resetClassPreview();
     setClassPreview({
       job,
-      recording: matchedRecording,
+      recording: null,
       label,
       subJobId,
       moments,
@@ -1610,53 +1740,30 @@ export default function RecordingPage() {
     });
 
     try {
-      let recordingDownloadError: string | null = null;
+      const matchedRecording = await resolveRecordingForJob(job);
 
       if (matchedRecording) {
         const selectedFilename = job.selectedObjectKey
           ? fileNameFromKey(job.selectedObjectKey)
           : undefined;
-        try {
-          const file = await downloadRecordingFile(matchedRecording.id, {
-            folderName: matchedRecording.folderName,
-            filename: selectedFilename,
-          });
-          const objectUrl = window.URL.createObjectURL(file.blob);
-          classPreviewUrlRef.current = objectUrl;
-
-          setClassPreview((current) => ({
-            ...current,
-            loading: false,
-            mediaType: "video",
-            mediaUrl: objectUrl,
-            mediaFilename: file.filename,
-            note:
-              moments.length > 0
-                ? "Showing the original recording with saved bounding boxes overlaid for the selected violation moment."
-                : "Showing the source recording. No saved bounding boxes were found for this class in the aggregate result.",
-          }));
-          return;
-        } catch (downloadError) {
-          recordingDownloadError =
-            downloadError instanceof Error ? downloadError.message : "Failed to download source recording.";
-        }
-      }
-
-      if (subJobId) {
-        const previewBlob = await fetchAiJobPreview(subJobId);
-        const objectUrl = window.URL.createObjectURL(previewBlob);
+        const file = await downloadRecordingFile(matchedRecording.id, {
+          folderName: matchedRecording.folderName,
+          filename: selectedFilename,
+        });
+        const objectUrl = window.URL.createObjectURL(file.blob);
         classPreviewUrlRef.current = objectUrl;
 
         setClassPreview((current) => ({
           ...current,
+          recording: matchedRecording,
           loading: false,
-          mediaType: "image",
+          mediaType: "video",
           mediaUrl: objectUrl,
-          mediaFilename: `${subJobId}.jpg`,
+          mediaFilename: file.filename,
           note:
-            recordingDownloadError
-              ? `The source recording could not be downloaded, so this is the detector preview image fallback. ${recordingDownloadError}`
-              : "Original recording metadata was not available in the current list, so this is the detector preview image fallback.",
+            moments.length > 0
+              ? "Showing the saved frame directly from the original recording with bounding boxes drawn from the stored JSON."
+              : "Showing the original recording. No saved violations were found for this class in the aggregate result.",
         }));
         return;
       }
@@ -1664,7 +1771,8 @@ export default function RecordingPage() {
       setClassPreview((current) => ({
         ...current,
         loading: false,
-        error: recordingDownloadError ?? "This class has no previewable source available yet.",
+        error:
+          "The original recording could not be resolved for this job, so the saved frame cannot be reconstructed from video.",
       }));
     } catch (previewError) {
       setClassPreview((current) => ({
