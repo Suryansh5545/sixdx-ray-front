@@ -566,23 +566,42 @@ function ClassPreviewModal({
       moment.events.forEach((event) => {
         if (!event.bbox) return;
 
-        const boxWidth = Math.max(0, event.bbox.x2 - event.bbox.x1);
-        const boxHeight = Math.max(0, event.bbox.y2 - event.bbox.y1);
+        const clampedX1 = Math.min(Math.max(Math.min(event.bbox.x1, event.bbox.x2), 0), width);
+        const clampedY1 = Math.min(Math.max(Math.min(event.bbox.y1, event.bbox.y2), 0), height);
+        const clampedX2 = Math.min(Math.max(Math.max(event.bbox.x1, event.bbox.x2), 0), width);
+        const clampedY2 = Math.min(Math.max(Math.max(event.bbox.y1, event.bbox.y2), 0), height);
+        const boxWidth = Math.max(0, clampedX2 - clampedX1);
+        const boxHeight = Math.max(0, clampedY2 - clampedY1);
+
+        if (boxWidth === 0 || boxHeight === 0) return;
+
         drawingContext.fillStyle = "rgba(239,68,68,0.12)";
         drawingContext.strokeStyle = "#ef4444";
         drawingContext.lineWidth = 4;
-        drawingContext.fillRect(event.bbox.x1, event.bbox.y1, boxWidth, boxHeight);
-        drawingContext.strokeRect(event.bbox.x1, event.bbox.y1, boxWidth, boxHeight);
+        drawingContext.fillRect(clampedX1, clampedY1, boxWidth, boxHeight);
+        drawingContext.strokeRect(clampedX1, clampedY1, boxWidth, boxHeight);
 
         const text = `${formatClassLabel(event.label)}${
           event.confidence != null ? ` ${(event.confidence * 100).toFixed(1)}%` : ""
         }`;
-        drawingContext.font = "600 20px 'DM Sans', sans-serif";
+        let fontSize = 20;
+        drawingContext.font = `600 ${fontSize}px 'DM Sans', sans-serif`;
         drawingContext.textBaseline = "top";
-        const textX = event.bbox.x1;
-        const textY = Math.max(6, event.bbox.y1 - 28);
-        const textWidth = drawingContext.measureText(text).width + 16;
+        let textWidth = drawingContext.measureText(text).width + 16;
         const textHeight = 26;
+
+        const maxLabelWidth = Math.max(80, width - 8);
+        while (textWidth > maxLabelWidth && fontSize > 12) {
+          fontSize -= 1;
+          drawingContext.font = `600 ${fontSize}px 'DM Sans', sans-serif`;
+          textWidth = drawingContext.measureText(text).width + 16;
+        }
+
+        const textX = Math.min(Math.max(clampedX1, 4), Math.max(4, width - textWidth - 4));
+        const textY = Math.min(
+          Math.max(clampedY1 - textHeight - 6, 4),
+          Math.max(4, height - textHeight - 4),
+        );
 
         drawingContext.fillStyle = "rgba(0,0,0,0.72)";
         drawingContext.fillRect(textX, textY, textWidth, textHeight);
