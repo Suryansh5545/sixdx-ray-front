@@ -6,6 +6,7 @@ import Organisation from './pages/Organisation'
 import Meeting from './pages/Meeting'
 import Room from './pages/Room'
 import RecordingPage from './pages/Recording'
+import Dashboard from './pages/Dashboard'
 import { AppProvider, useAppContext } from './context/AppContext'
 
 function RequireUsername({ children }: { children: ReactElement }) {
@@ -47,6 +48,14 @@ function AppRoutes() {
         element={
           <RequireOrganisation>
             <Room />
+          </RequireOrganisation>
+        }
+      />
+      <Route
+        path="/dashboard"
+        element={
+          <RequireOrganisation>
+            <Dashboard />
           </RequireOrganisation>
         }
       />

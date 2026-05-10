@@ -100,13 +100,11 @@ export default function Organisation() {
     setTimeout(() => {
       setLoading(false);
       setSelectedOrg(selected.id);
-      // if the login was via the test bypass, jump straight to room creator
+      // Navigate everyone to the dashboard after selecting an organisation
       if (isTestLogin) {
         setIsTestLogin(false); // clear the flag now that we've acted on it
-        navigate("/room");
-      } else {
-        navigate("/meetings");
       }
+      navigate("/dashboard");
     }, 1200);
   }
 

@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, type ReactNode } from 'react'
 
-type PageName = 'landing' | 'organisation' | 'meetings' | 'recordings'
+type PageName = 'landing' | 'organisation' | 'dashboard' | 'meetings' | 'recordings'
 
 interface AppContextValue {
   username: string | null
