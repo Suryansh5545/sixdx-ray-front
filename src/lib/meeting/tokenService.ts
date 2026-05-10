@@ -1,16 +1,45 @@
-import { TokenSource } from 'livekit-client'
-
-const SANDBOX_ID = import.meta.env.VITE_LIVEKIT_SANDBOX_ID as string
+import { fetchWithAuth } from '../auth'
+import { resolveLivekitServerUrl } from '../server'
 
 export interface TokenResult {
   token: string
   serverUrl: string
 }
 
-export async function fetchToken(roomId: string, identity: string): Promise<TokenResult> {
-  const { serverUrl, participantToken } = await TokenSource
-    .sandboxTokenServer(SANDBOX_ID)
-    .fetch({ roomName: roomId, participantName: identity })
+interface TokenApiResponse {
+  token?: string
+  participantToken?: string
+  participant_token?: string
+  serverUrl?: string
+  server_url?: string
+}
 
-  return { token: participantToken, serverUrl }
+export async function fetchToken(roomId: string, identity: string): Promise<TokenResult> {
+  const encodedRoomId = encodeURIComponent(roomId)
+
+  const response = await fetchWithAuth(`/livekit/rooms/${encodedRoomId}/token`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      identity,
+      participantName: identity,
+      participant_name: identity,
+    }),
+  })
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch meeting token')
+  }
+
+  const data = (await response.json()) as TokenApiResponse
+  const token = data.token ?? data.participantToken ?? data.participant_token
+  const serverUrl = resolveLivekitServerUrl(data.serverUrl ?? data.server_url)
+
+  if (!token || !serverUrl) {
+    throw new Error('Missing meeting token or server URL')
+  }
+
+  return { token, serverUrl }
 }

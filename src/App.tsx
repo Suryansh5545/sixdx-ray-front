@@ -8,39 +8,53 @@ import Room from './pages/Room'
 import RecordingPage from './pages/Recording'
 import Dashboard from './pages/Dashboard'
 import { AppProvider, useAppContext } from './context/AppContext'
+import { isValidRoomCode } from './lib/meeting/roomCode'
 
-function RequireUsername({ children }: { children: ReactElement }) {
-  const { username } = useAppContext()
-  if (!username) return <Navigate to="/" replace />
+function HomeRoute() {
+  const { authSession, isTestLogin, selectedOrg } = useAppContext()
+
+  if (authSession || isTestLogin) {
+    return <Navigate to={selectedOrg ? '/dashboard' : '/organizations'} replace />
+  }
+
+  return <LandingPage />
+}
+
+function RequireIdentifier({ children }: { children: ReactElement }) {
+  const { identifier } = useAppContext()
+  if (!identifier) return <Navigate to="/" replace />
   return children
 }
 
 function RequireOrganisation({ children }: { children: ReactElement }) {
-  const { username, selectedOrg } = useAppContext()
-  if (!username) return <Navigate to="/" replace />
+  const { identifier, selectedOrg } = useAppContext()
+  if (!identifier) return <Navigate to="/" replace />
   if (!selectedOrg) return <Navigate to="/organizations" replace />
   return children
 }
 
 function MeetingRoute() {
-  const { username, selectedOrg } = useAppContext()
+  const { identifier } = useAppContext()
   const location = useLocation()
   const roomCode = (location.state as { roomCode?: string } | null)?.roomCode
-    ?? selectedOrg
-    ?? 'default-room'
-  return <Meeting roomId={roomCode} localName={username ?? 'You'} />
+
+  if (!isValidRoomCode(roomCode)) {
+    return <Navigate to="/room" replace />
+  }
+
+  return <Meeting roomId={roomCode} localName={identifier ?? 'You'} />
 }
 
 function AppRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<LandingPage />} />
+      <Route path="/" element={<HomeRoute />} />
       <Route
         path="/organizations"
         element={
-          <RequireUsername>
+          <RequireIdentifier>
             <Organisation />
-          </RequireUsername>
+          </RequireIdentifier>
         }
       />
       <Route

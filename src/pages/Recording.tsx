@@ -1,764 +1,684 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
+import { formatRoomCode } from "../lib/meeting/roomCode";
+import {
+  analyzeRecording,
+  DEFAULT_RECORDING_ANALYSIS_CLASSES,
+  downloadRecordingFile,
+  getRecordingAnalysisJobId,
+  listRecordings,
+  type RecordingListItem,
+  type RecordingRoot,
+} from "../lib/recordings";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-export interface Recording {
-  id: string;
-  title: string;
-  roomId: string;
-  startedAt: string;      // ISO date string
-  durationSeconds: number;
-  sizeBytes?: number;
-  thumbnailUrl?: string;
-  downloadUrl?: string;
-  streamUrl?: string;     // HLS / direct MP4 for playback
-  recordedBy: string;
-  participants: string[]; // names
-  status: "processing" | "ready" | "failed";
+type ActionKind = "preview" | "download" | "analyze";
+
+interface BannerState {
+  kind: "success" | "error";
+  text: string;
 }
 
-interface RecordingPageProps {
-  /**
-   * Fetch recordings from your backend.
-   * Replace the default stub with a real API call.
-   */
-  fetchRecordings?: () => Promise<Recording[]>;
-  /**
-   * Delete a recording by ID on your backend.
-   */
-  deleteRecording?: (id: string) => Promise<void>;
+interface PreviewState {
+  recording: RecordingListItem | null;
+  url: string | null;
+  filename: string | null;
+  loading: boolean;
+  error: string | null;
 }
 
-// ─── Utilities ────────────────────────────────────────────────────────────────
-function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
+const ROOT_OPTIONS: Array<{ value: RecordingRoot; label: string; hint: string }> = [
+  {
+    value: "livekit_recordings",
+    label: "Meetings",
+    hint: "Standard LiveKit room recordings",
+  },
+  {
+    value: "hse_safety_audit",
+    label: "HSE Audits",
+    hint: "Safety-audit recording folders",
+  },
+];
 
 function formatDate(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) +
-    " · " +
-    d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  const date = new Date(iso);
+  return (
+    date.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }) +
+    " - " +
+    date.toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  );
 }
 
-function formatSize(bytes?: number): string {
-  if (!bytes) return "";
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(0)} KB`;
-  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+function truncateMiddle(value: string | null, maxLength = 52): string {
+  if (!value) return "Not available";
+  if (value.length <= maxLength) return value;
+
+  const headLength = Math.max(14, Math.floor((maxLength - 3) / 2));
+  const tailLength = Math.max(10, maxLength - headLength - 3);
+  return `${value.slice(0, headLength)}...${value.slice(-tailLength)}`;
 }
 
-// ─── Default stub — replace with real API call ────────────────────────────────
-async function defaultFetchRecordings(): Promise<Recording[]> {
-  // Simulate network delay
-  await new Promise((r) => setTimeout(r, 900));
-  return [
-    {
-      id: "rec-001",
-      title: "Weekly Sync",
-      roomId: "room-abc",
-      startedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-      durationSeconds: 3247,
-      sizeBytes: 184 * 1024 * 1024,
-      recordedBy: "Jordan Riley",
-      participants: ["Jordan Riley", "Sofia M.", "Kai T.", "Alex B."],
-      status: "ready",
-    },
-    {
-      id: "rec-002",
-      title: "Design Review",
-      roomId: "room-def",
-      startedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-      durationSeconds: 1820,
-      sizeBytes: 98 * 1024 * 1024,
-      recordedBy: "Sofia M.",
-      participants: ["Sofia M.", "Jordan Riley"],
-      status: "ready",
-    },
-    {
-      id: "rec-003",
-      title: "Q3 Planning",
-      roomId: "room-ghi",
-      startedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-      durationSeconds: 0,
-      recordedBy: "Kai T.",
-      participants: ["Kai T.", "Alex B.", "Jordan Riley", "Sam W.", "Riley P."],
-      status: "processing",
-    },
-    {
-      id: "rec-004",
-      title: "Client Onboarding",
-      roomId: "room-jkl",
-      startedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-      durationSeconds: 2640,
-      sizeBytes: 142 * 1024 * 1024,
-      recordedBy: "Alex B.",
-      participants: ["Alex B.", "Client User"],
-      status: "failed",
-    },
-  ];
+function roomTypeLabel(value: string | null): string {
+  if (!value) return "Room";
+  if (value === "hse_safety_audit") return "HSE Audit";
+  if (value === "meeting") return "Meeting";
+  return value.replace(/_/g, " ");
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+function fileNameFromKey(value: string): string {
+  const segments = value.split("/");
+  return segments[segments.length - 1] || value;
+}
 
-/** Video player modal */
-function PlayerModal({
-  recording,
+function downloadBlob(blob: Blob, filename: string) {
+  const objectUrl = window.URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => {
+    window.URL.revokeObjectURL(objectUrl);
+  }, 0);
+}
+
+function PreviewModal({
+  preview,
   onClose,
+  onDownload,
+  downloadBusy,
 }: {
-  recording: Recording;
+  preview: PreviewState;
   onClose: () => void;
+  onDownload: (recording: RecordingListItem) => void;
+  downloadBusy: boolean;
 }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [playing, setPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(recording.durationSeconds);
-  const [volume, setVolume] = useState(1);
-  const [muted, setMuted] = useState(false);
+  const recording = preview.recording;
 
-  const togglePlay = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (v.paused) { v.play(); setPlaying(true); }
-    else { v.pause(); setPlaying(false); }
-  }, []);
-
-  function handleTimeUpdate() {
-    const v = videoRef.current;
-    if (!v || !v.duration) return;
-    setCurrentTime(v.currentTime);
-    setProgress(v.currentTime / v.duration);
-  }
-
-  function handleLoadedMetadata() {
-    const v = videoRef.current;
-    if (v) setDuration(v.duration);
-  }
-
-  function handleSeek(e: React.ChangeEvent<HTMLInputElement>) {
-    const v = videoRef.current;
-    if (!v || !v.duration) return;
-    const t = Number(e.target.value) * v.duration;
-    v.currentTime = t;
-    setProgress(Number(e.target.value));
-  }
-
-  function handleVolume(e: React.ChangeEvent<HTMLInputElement>) {
-    const val = Number(e.target.value);
-    setVolume(val);
-    if (videoRef.current) videoRef.current.volume = val;
-    setMuted(val === 0);
-  }
-
-  function toggleMute() {
-    const v = videoRef.current;
-    if (!v) return;
-    v.muted = !v.muted;
-    setMuted(v.muted);
-  }
-
-  // Close on Escape
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-      if (e.key === " ") { e.preventDefault(); togglePlay(); }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, togglePlay]);
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  if (!recording) return null;
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(2,5,14,0.92)", backdropFilter: "blur(12px)" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ background: "rgba(2,5,14,0.92)", backdropFilter: "blur(14px)" }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
     >
       <div
-        className="flex flex-col w-full overflow-hidden"
+        className="w-full overflow-hidden rounded-[24px]"
         style={{
-          maxWidth: 860,
-          background: "linear-gradient(160deg, #080f22, #050c1c)",
-          border: "1px solid rgba(255,255,255,0.09)",
-          borderRadius: 20,
-          boxShadow: "0 32px 80px rgba(0,10,60,0.6)",
+          maxWidth: 940,
+          background: "linear-gradient(160deg, #081022, #050c1c)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          boxShadow: "0 32px 80px rgba(0,10,60,0.55)",
         }}
       >
-        {/* Modal header */}
         <div
-          className="flex items-center justify-between px-5 py-4"
+          className="flex items-start justify-between gap-4 px-5 py-4"
           style={{ borderBottom: "1px solid rgba(255,255,255,0.07)" }}
         >
           <div>
-            <p className="text-white font-medium text-sm">{recording.title}</p>
-            <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.35)" }}>
-              {formatDate(recording.startedAt)} · {recording.roomId}
+            <p className="text-white text-base font-medium">{recording.roomId}</p>
+            <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.42)" }}>
+              {recording.folderName} - {formatDate(recording.createdAt)}
             </p>
+            {preview.filename && (
+              <p className="text-xs mt-2" style={{ color: "rgba(79,179,255,0.75)" }}>
+                {preview.filename}
+              </p>
+            )}
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Close player"
-            className="flex items-center justify-center rounded-xl transition-opacity hover:opacity-70"
-            style={{
-              width: 32, height: 32,
-              background: "rgba(255,255,255,0.07)",
-              border: "1px solid rgba(255,255,255,0.1)",
-              cursor: "pointer",
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-              stroke="rgba(255,255,255,0.6)" strokeWidth="2.5"
-              strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"/>
-              <line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onDownload(recording)}
+              disabled={downloadBusy}
+              className="px-3 py-2 rounded-xl text-xs transition-opacity hover:opacity-80"
+              style={{
+                background: "rgba(30,107,255,0.2)",
+                border: "1px solid rgba(79,179,255,0.3)",
+                color: "#90caff",
+                cursor: downloadBusy ? "not-allowed" : "pointer",
+                fontFamily: "'DM Sans', sans-serif",
+              }}
+            >
+              {downloadBusy ? "Downloading..." : "Download"}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex items-center justify-center rounded-xl transition-opacity hover:opacity-70"
+              style={{
+                width: 34,
+                height: 34,
+                background: "rgba(255,255,255,0.07)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                color: "rgba(255,255,255,0.65)",
+                cursor: "pointer",
+              }}
+              aria-label="Close preview"
+            >
+              x
+            </button>
+          </div>
         </div>
 
-        {/* Video area */}
         <div
-          className="relative w-full cursor-pointer"
+          className="flex items-center justify-center"
           style={{ background: "#000", aspectRatio: "16/9" }}
-          onClick={togglePlay}
         >
-          {recording.streamUrl ? (
-            <video
-              ref={videoRef}
-              src={recording.streamUrl}
-              className="w-full h-full object-contain"
-              onTimeUpdate={handleTimeUpdate}
-              onLoadedMetadata={handleLoadedMetadata}
-              onEnded={() => setPlaying(false)}
-            />
-          ) : (
-            /* No stream URL — placeholder */
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+          {preview.loading && (
+            <div className="flex flex-col items-center gap-4">
               <div
-                className="flex items-center justify-center rounded-2xl"
                 style={{
-                  width: 64, height: 64,
-                  background: "rgba(30,107,255,0.15)",
-                  border: "1px solid rgba(79,179,255,0.2)",
+                  width: 40,
+                  height: 40,
+                  border: "2px solid rgba(79,179,255,0.15)",
+                  borderTopColor: "#4fb3ff",
+                  borderRadius: "50%",
+                  animation: "spin 0.85s linear infinite",
                 }}
-              >
-                <svg width="26" height="26" viewBox="0 0 24 24" fill="none"
-                  stroke="rgba(79,179,255,0.5)" strokeWidth="1.8"
-                  strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="5 3 19 12 5 21 5 3"/>
-                </svg>
-              </div>
-              <p className="text-xs" style={{ color: "rgba(255,255,255,0.25)" }}>
-                No stream URL — wire <code style={{ color: "rgba(79,179,255,0.6)" }}>recording.streamUrl</code> to play
+              />
+              <p className="text-sm" style={{ color: "rgba(255,255,255,0.38)" }}>
+                Loading preview...
               </p>
             </div>
           )}
 
-          {/* Play/pause overlay */}
-          {recording.streamUrl && !playing && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div
-                className="flex items-center justify-center rounded-full"
-                style={{
-                  width: 56, height: 56,
-                  background: "rgba(0,0,0,0.55)",
-                  border: "1px solid rgba(255,255,255,0.2)",
-                  backdropFilter: "blur(8px)",
-                }}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="white" stroke="none">
-                  <polygon points="5 3 19 12 5 21 5 3"/>
-                </svg>
-              </div>
+          {!preview.loading && preview.error && (
+            <div className="max-w-md px-6 text-center">
+              <p className="text-sm" style={{ color: "rgba(255,170,170,0.92)" }}>
+                {preview.error}
+              </p>
             </div>
           )}
-        </div>
 
-        {/* Player controls */}
-        <div className="px-5 py-4 space-y-3">
-          {/* Progress bar */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs tabular-nums w-10 text-right"
-              style={{ color: "rgba(255,255,255,0.4)", fontFamily: "'DM Sans', sans-serif" }}>
-              {formatDuration(Math.floor(currentTime))}
-            </span>
-            <div className="flex-1 relative h-1.5 rounded-full overflow-hidden"
-              style={{ background: "rgba(255,255,255,0.1)" }}>
-              <div
-                className="absolute left-0 top-0 h-full rounded-full"
-                style={{
-                  width: `${progress * 100}%`,
-                  background: "linear-gradient(to right, #1e6bff, #4fb3ff)",
-                  transition: "width 0.1s linear",
-                }}
-              />
-              <input
-                type="range" min={0} max={1} step={0.001}
-                value={progress}
-                onChange={handleSeek}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                aria-label="Seek"
-              />
-            </div>
-            <span className="text-xs tabular-nums w-10"
-              style={{ color: "rgba(255,255,255,0.4)", fontFamily: "'DM Sans', sans-serif" }}>
-              {formatDuration(Math.floor(duration))}
-            </span>
-          </div>
-
-          {/* Buttons row */}
-          <div className="flex items-center gap-3">
-            {/* Play / Pause */}
-            <button
-              onClick={togglePlay}
-              aria-label={playing ? "Pause" : "Play"}
-              className="flex items-center justify-center rounded-full transition-all duration-150 hover:scale-105 active:scale-95"
-              style={{
-                width: 40, height: 40,
-                background: "linear-gradient(135deg, rgba(255,255,255,0.14), rgba(180,210,255,0.10))",
-                border: "1.5px solid rgba(255,255,255,0.18)",
-                boxShadow: "0 2px 0 rgba(255,255,255,0.12) inset, 0 4px 14px rgba(0,30,160,0.15)",
-                cursor: "pointer",
-              }}
-            >
-              {playing ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                  stroke="rgba(255,255,255,0.85)" strokeWidth="2.5"
-                  strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="6" y1="4" x2="6" y2="20"/>
-                  <line x1="18" y1="4" x2="18" y2="20"/>
-                </svg>
-              ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="rgba(255,255,255,0.85)" stroke="none">
-                  <polygon points="5 3 19 12 5 21 5 3"/>
-                </svg>
-              )}
-            </button>
-
-            {/* Volume */}
-            <button
-              onClick={toggleMute}
-              aria-label={muted ? "Unmute" : "Mute"}
-              className="flex items-center justify-center rounded-full transition-opacity hover:opacity-70"
-              style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-                stroke="rgba(255,255,255,0.5)" strokeWidth="2"
-                strokeLinecap="round" strokeLinejoin="round">
-                {muted || volume === 0 ? (
-                  <>
-                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-                    <line x1="23" y1="9" x2="17" y2="15"/>
-                    <line x1="17" y1="9" x2="23" y2="15"/>
-                  </>
-                ) : volume < 0.5 ? (
-                  <>
-                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-                    <path d="M15.54 8.46a5 5 0 010 7.07"/>
-                  </>
-                ) : (
-                  <>
-                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-                    <path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/>
-                  </>
-                )}
-              </svg>
-            </button>
-
-            <input
-              type="range" min={0} max={1} step={0.01}
-              value={muted ? 0 : volume}
-              onChange={handleVolume}
-              aria-label="Volume"
-              className="w-20 h-1 rounded-full cursor-pointer"
-              style={{ accentColor: "#4fb3ff" }}
+          {!preview.loading && !preview.error && preview.url && (
+            <video
+              src={preview.url}
+              controls
+              autoPlay
+              className="w-full h-full object-contain"
             />
-
-            {/* Spacer */}
-            <div className="flex-1" />
-
-            {/* Download */}
-            {recording.downloadUrl && (
-              <a
-                href={recording.downloadUrl}
-                download
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs transition-opacity hover:opacity-80"
-                style={{
-                  background: "rgba(30,107,255,0.2)",
-                  border: "1px solid rgba(79,179,255,0.3)",
-                  color: "#90caff",
-                  textDecoration: "none",
-                  fontFamily: "'DM Sans', sans-serif",
-                }}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" strokeWidth="2.2"
-                  strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                  <polyline points="7 10 12 15 17 10"/>
-                  <line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-                Download
-              </a>
-            )}
-          </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-/** Single recording card */
 function RecordingCard({
   recording,
-  onPlay,
-  onDelete,
+  busyAction,
+  analysisSummary,
+  onPreview,
+  onDownload,
+  onAnalyze,
 }: {
-  recording: Recording;
-  onPlay: (r: Recording) => void;
-  onDelete: (id: string) => void;
+  recording: RecordingListItem;
+  busyAction?: ActionKind;
+  analysisSummary?: string;
+  onPreview: (recording: RecordingListItem) => void;
+  onDownload: (recording: RecordingListItem) => void;
+  onAnalyze: (recording: RecordingListItem) => void;
 }) {
-  const [confirmDelete, setConfirmDelete] = useState(false);
-
-  const statusConfig = {
-    ready:      { label: "Ready",      color: "#22c55e", bg: "rgba(34,197,94,0.12)",  border: "rgba(34,197,94,0.25)"  },
-    processing: { label: "Processing", color: "#f59e0b", bg: "rgba(245,158,11,0.12)", border: "rgba(245,158,11,0.25)" },
-    failed:     { label: "Failed",     color: "#ef4444", bg: "rgba(239,68,68,0.12)",  border: "rgba(239,68,68,0.25)"  },
-  }[recording.status];
+  const isBusy = busyAction !== undefined;
 
   return (
     <div
-      className="flex flex-col rounded-2xl overflow-hidden transition-all duration-200 hover:translate-y-[-2px]"
+      className="rounded-3xl p-5 flex flex-col gap-4"
       style={{
-        background: "linear-gradient(160deg, rgba(10,18,40,0.9), rgba(6,12,28,0.95))",
+        background: "linear-gradient(160deg, rgba(10,18,40,0.92), rgba(6,12,28,0.96))",
         border: "1px solid rgba(255,255,255,0.07)",
-        boxShadow: "0 4px 24px rgba(0,10,60,0.35)",
+        boxShadow: "0 12px 32px rgba(0,10,60,0.3)",
       }}
     >
-      {/* Thumbnail / placeholder */}
-      <div
-        className="relative w-full flex-shrink-0"
-        style={{ aspectRatio: "16/9", background: "#040a18", cursor: recording.status === "ready" ? "pointer" : "default" }}
-        onClick={() => recording.status === "ready" && onPlay(recording)}
-      >
-        {recording.thumbnailUrl ? (
-          <img
-            src={recording.thumbnailUrl}
-            alt={recording.title}
-            className="w-full h-full object-cover"
-            loading="lazy"
-          />
-        ) : (
-          <div className="absolute inset-0 flex items-center justify-center"
-            style={{
-              background: "radial-gradient(ellipse at center, rgba(20,50,150,0.2) 0%, transparent 70%)",
-            }}
-          >
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none"
-              stroke="rgba(255,255,255,0.12)" strokeWidth="1.5"
-              strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"/>
-              <polygon points="10 8 16 12 10 16 10 8"/>
-            </svg>
-          </div>
-        )}
-
-        {/* Duration badge */}
-        {recording.status === "ready" && recording.durationSeconds > 0 && (
-          <div
-            className="absolute bottom-2 right-2 px-2 py-0.5 rounded-lg text-xs tabular-nums"
-            style={{
-              background: "rgba(0,0,0,0.7)",
-              color: "rgba(255,255,255,0.85)",
-              fontFamily: "'DM Sans', sans-serif",
-              backdropFilter: "blur(4px)",
-            }}
-          >
-            {formatDuration(recording.durationSeconds)}
-          </div>
-        )}
-
-        {/* Processing overlay */}
-        {recording.status === "processing" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2"
-            style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}>
-            <div style={{
-              width: 28, height: 28,
-              border: "2px solid rgba(245,158,11,0.2)",
-              borderTopColor: "#f59e0b",
-              borderRadius: "50%",
-              animation: "spin 0.8s linear infinite",
-            }} />
-            <span className="text-xs" style={{ color: "rgba(245,158,11,0.8)" }}>Processing…</span>
-          </div>
-        )}
-
-        {/* Play overlay on hover */}
-        {recording.status === "ready" && (
-          <div
-            className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity duration-200"
-            style={{ background: "rgba(0,0,0,0.4)" }}
-          >
-            <div
-              className="flex items-center justify-center rounded-full"
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <span
+              className="px-2.5 py-1 rounded-full text-[11px]"
               style={{
-                width: 44, height: 44,
-                background: "rgba(255,255,255,0.15)",
-                border: "1px solid rgba(255,255,255,0.25)",
-                backdropFilter: "blur(8px)",
+                background: "rgba(79,179,255,0.14)",
+                border: "1px solid rgba(79,179,255,0.22)",
+                color: "#90caff",
               }}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="white" stroke="none">
-                <polygon points="5 3 19 12 5 21 5 3"/>
-              </svg>
-            </div>
+              {ROOT_OPTIONS.find((option) => option.value === recording.recordingRoot)?.label}
+            </span>
+            <span
+              className="px-2.5 py-1 rounded-full text-[11px]"
+              style={{
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.08)",
+                color: "rgba(255,255,255,0.48)",
+              }}
+            >
+              {roomTypeLabel(recording.roomType)}
+            </span>
+          </div>
+
+          <h2 className="text-lg font-semibold text-white">{recording.roomId}</h2>
+          <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.45)" }}>
+            {recording.folderName}
+          </p>
+        </div>
+
+        <div
+          className="rounded-2xl px-3 py-2 text-right"
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}
+        >
+          <p className="text-[11px]" style={{ color: "rgba(255,255,255,0.32)" }}>
+            CREATED
+          </p>
+          <p className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.72)" }}>
+            {formatDate(recording.createdAt)}
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 text-sm">
+        <div
+          className="rounded-2xl p-3"
+          style={{
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.06)",
+          }}
+        >
+          <p className="text-[11px] mb-1" style={{ color: "rgba(255,255,255,0.3)" }}>
+            STORAGE
+          </p>
+          <p style={{ color: "rgba(255,255,255,0.82)" }}>
+            {recording.storageBucket || "No bucket recorded"}
+          </p>
+          <p
+            className="text-xs mt-2"
+            style={{ color: "rgba(255,255,255,0.36)", fontFamily: "monospace" }}
+          >
+            {truncateMiddle(recording.pathPrefix)}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div
+            className="rounded-2xl p-3"
+            style={{
+              background: "rgba(255,255,255,0.03)",
+              border: "1px solid rgba(255,255,255,0.06)",
+            }}
+          >
+            <p className="text-[11px] mb-1" style={{ color: "rgba(255,255,255,0.3)" }}>
+              CREATOR
+            </p>
+            <p className="text-sm" style={{ color: "rgba(255,255,255,0.82)" }}>
+              User #{recording.createdByUserId}
+            </p>
+          </div>
+          <div
+            className="rounded-2xl p-3"
+            style={{
+              background: "rgba(255,255,255,0.03)",
+              border: "1px solid rgba(255,255,255,0.06)",
+            }}
+          >
+            <p className="text-[11px] mb-1" style={{ color: "rgba(255,255,255,0.3)" }}>
+              EGRESS
+            </p>
+            <p className="text-sm" style={{ color: "rgba(255,255,255,0.82)" }}>
+              {recording.autoTrackEgressEnabled ? "Tracks on" : "Tracks off"}
+            </p>
+            <p className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.42)" }}>
+              {recording.roomCompositeEgressEnabled ? "Composite on" : "Composite off"}
+            </p>
+          </div>
+        </div>
+
+        {(recording.trackRecordingTemplate || recording.compositeRecordingTemplate) && (
+          <div
+            className="rounded-2xl p-3"
+            style={{
+              background: "rgba(255,255,255,0.03)",
+              border: "1px solid rgba(255,255,255,0.06)",
+            }}
+          >
+            <p className="text-[11px] mb-2" style={{ color: "rgba(255,255,255,0.3)" }}>
+              TEMPLATES
+            </p>
+            {recording.trackRecordingTemplate && (
+              <p
+                className="text-xs"
+                style={{ color: "rgba(255,255,255,0.42)", fontFamily: "monospace" }}
+              >
+                Track: {truncateMiddle(recording.trackRecordingTemplate, 68)}
+              </p>
+            )}
+            {recording.compositeRecordingTemplate && (
+              <p
+                className="text-xs mt-2"
+                style={{ color: "rgba(255,255,255,0.42)", fontFamily: "monospace" }}
+              >
+                Composite: {truncateMiddle(recording.compositeRecordingTemplate, 68)}
+              </p>
+            )}
           </div>
         )}
       </div>
 
-      {/* Card body */}
-      <div className="p-4 flex flex-col gap-2.5 flex-1">
-        {/* Title + status */}
-        <div className="flex items-start justify-between gap-2">
-          <p className="text-sm font-medium leading-snug"
-            style={{ color: "rgba(255,255,255,0.85)", fontFamily: "'DM Sans', sans-serif" }}>
-            {recording.title}
-          </p>
-          <div
-            className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs flex-shrink-0"
-            style={{
-              background: statusConfig.bg,
-              border: `1px solid ${statusConfig.border}`,
-              color: statusConfig.color,
-              fontFamily: "'DM Sans', sans-serif",
-              fontSize: "0.65rem",
-              letterSpacing: "0.04em",
-            }}
-          >
-            {recording.status === "processing" && (
-              <span className="inline-block rounded-full"
-                style={{ width: 5, height: 5, background: statusConfig.color, animation: "recordDot 1s ease-in-out infinite" }} />
-            )}
-            {statusConfig.label}
-          </div>
+      {analysisSummary && (
+        <div
+          className="rounded-2xl px-3 py-2 text-xs"
+          style={{
+            background: "rgba(34,197,94,0.12)",
+            border: "1px solid rgba(34,197,94,0.25)",
+            color: "rgba(170,245,195,0.92)",
+          }}
+        >
+          {analysisSummary}
         </div>
+      )}
 
-        {/* Meta row */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          {/* Date */}
-          <span className="text-xs" style={{ color: "rgba(255,255,255,0.35)", fontFamily: "'DM Sans', sans-serif" }}>
-            {formatDate(recording.startedAt)}
-          </span>
-          {/* Size */}
-          {recording.sizeBytes && (
-            <span className="text-xs" style={{ color: "rgba(255,255,255,0.25)" }}>
-              {formatSize(recording.sizeBytes)}
-            </span>
-          )}
-        </div>
+      <div className="grid grid-cols-3 gap-2 mt-auto">
+        <button
+          type="button"
+          onClick={() => onPreview(recording)}
+          disabled={isBusy}
+          className="px-3 py-2 rounded-2xl text-xs transition-opacity hover:opacity-80"
+          style={{
+            background: "rgba(255,255,255,0.08)",
+            border: "1px solid rgba(255,255,255,0.12)",
+            color: "rgba(255,255,255,0.82)",
+            cursor: isBusy ? "not-allowed" : "pointer",
+            fontFamily: "'DM Sans', sans-serif",
+          }}
+        >
+          {busyAction === "preview" ? "Loading..." : "Preview"}
+        </button>
 
-        {/* Recorded by */}
-        <div className="flex items-center gap-1.5">
-          <div
-            className="flex items-center justify-center rounded-full text-xs font-semibold"
-            style={{
-              width: 20, height: 20,
-              background: "linear-gradient(135deg, #1e6bff, #0099ff)",
-              color: "white",
-              fontSize: "0.55rem",
-              letterSpacing: "0.02em",
-              flexShrink: 0,
-            }}
-          >
-            {recording.recordedBy.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)}
-          </div>
-          <span className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>
-            {recording.recordedBy}
-          </span>
-          {recording.participants.length > 1 && (
-            <span className="text-xs" style={{ color: "rgba(255,255,255,0.2)" }}>
-              +{recording.participants.length - 1} more
-            </span>
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={() => onDownload(recording)}
+          disabled={isBusy}
+          className="px-3 py-2 rounded-2xl text-xs transition-opacity hover:opacity-80"
+          style={{
+            background: "rgba(30,107,255,0.2)",
+            border: "1px solid rgba(79,179,255,0.28)",
+            color: "#90caff",
+            cursor: isBusy ? "not-allowed" : "pointer",
+            fontFamily: "'DM Sans', sans-serif",
+          }}
+        >
+          {busyAction === "download" ? "Saving..." : "Download"}
+        </button>
 
-        {/* Actions */}
-        <div className="flex items-center gap-2 mt-auto pt-1">
-          {/* Play */}
-          {recording.status === "ready" && (
-            <button
-              onClick={() => onPlay(recording)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs flex-1 justify-center transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]"
-              style={{
-                background: "linear-gradient(to bottom, rgba(255,255,255,0.12), rgba(180,210,255,0.08))",
-                border: "1.5px solid rgba(255,255,255,0.16)",
-                boxShadow: "0 2px 0 rgba(255,255,255,0.1) inset, 0 4px 12px rgba(0,30,160,0.15)",
-                color: "rgba(255,255,255,0.8)",
-                cursor: "pointer",
-                fontFamily: "'DM Sans', sans-serif",
-              }}
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-                <polygon points="5 3 19 12 5 21 5 3"/>
-              </svg>
-              Play
-            </button>
-          )}
-
-          {/* Download */}
-          {recording.downloadUrl && recording.status === "ready" && (
-            <a
-              href={recording.downloadUrl}
-              download
-              className="flex items-center justify-center rounded-xl transition-opacity hover:opacity-80"
-              style={{
-                width: 36, height: 36,
-                background: "rgba(30,107,255,0.15)",
-                border: "1px solid rgba(79,179,255,0.25)",
-                color: "#90caff",
-                textDecoration: "none",
-              }}
-              aria-label="Download recording"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2.2"
-                strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                <polyline points="7 10 12 15 17 10"/>
-                <line x1="12" y1="15" x2="12" y2="3"/>
-              </svg>
-            </a>
-          )}
-
-          {/* Delete */}
-          {confirmDelete ? (
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => onDelete(recording.id)}
-                className="px-2.5 py-1.5 rounded-xl text-xs transition-opacity hover:opacity-80"
-                style={{
-                  background: "rgba(239,68,68,0.25)",
-                  border: "1px solid rgba(239,68,68,0.4)",
-                  color: "#fca5a5",
-                  cursor: "pointer",
-                  fontFamily: "'DM Sans', sans-serif",
-                }}
-              >
-                Confirm
-              </button>
-              <button
-                onClick={() => setConfirmDelete(false)}
-                className="px-2.5 py-1.5 rounded-xl text-xs transition-opacity hover:opacity-70"
-                style={{
-                  background: "rgba(255,255,255,0.06)",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  color: "rgba(255,255,255,0.5)",
-                  cursor: "pointer",
-                  fontFamily: "'DM Sans', sans-serif",
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setConfirmDelete(true)}
-              className="flex items-center justify-center rounded-xl transition-opacity hover:opacity-70"
-              style={{
-                width: 36, height: 36,
-                background: "rgba(239,68,68,0.08)",
-                border: "1px solid rgba(239,68,68,0.18)",
-                color: "rgba(239,68,68,0.6)",
-                cursor: "pointer",
-              }}
-              aria-label="Delete recording"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2.2"
-                strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="3 6 5 6 21 6"/>
-                <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
-                <path d="M10 11v6M14 11v6"/>
-                <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
-              </svg>
-            </button>
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={() => onAnalyze(recording)}
+          disabled={isBusy}
+          className="px-3 py-2 rounded-2xl text-xs transition-opacity hover:opacity-80"
+          style={{
+            background: "rgba(245,158,11,0.16)",
+            border: "1px solid rgba(245,158,11,0.24)",
+            color: "#f7c56d",
+            cursor: isBusy ? "not-allowed" : "pointer",
+            fontFamily: "'DM Sans', sans-serif",
+          }}
+        >
+          {busyAction === "analyze" ? "Running..." : "Run AI"}
+        </button>
       </div>
     </div>
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
-export default function RecordingPage({
-  fetchRecordings = defaultFetchRecordings,
-  deleteRecording,
-}: RecordingPageProps) {
+export default function RecordingPage() {
   const navigate = useNavigate();
   const { setCurrentPage } = useAppContext();
+  const previewUrlRef = useRef<string | null>(null);
 
-  const [recordings, setRecordings] = useState<Recording[]>([]);
+  const [recordingRoot, setRecordingRoot] = useState<RecordingRoot>("livekit_recordings");
+  const [roomIdInput, setRoomIdInput] = useState("");
+  const [folderNameInput, setFolderNameInput] = useState("");
+  const [appliedRoomId, setAppliedRoomId] = useState("");
+  const [appliedFolderName, setAppliedFolderName] = useState("");
+  const [recordings, setRecordings] = useState<RecordingListItem[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [playingRecording, setPlayingRecording] = useState<Recording | null>(null);
-  const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"all" | "ready" | "processing" | "failed">("all");
-  const [sortBy, setSortBy] = useState<"date" | "duration" | "size">("date");
+  const [banner, setBanner] = useState<BannerState | null>(null);
+  const [busyActionById, setBusyActionById] = useState<Record<string, ActionKind>>({});
+  const [analysisSummaryById, setAnalysisSummaryById] = useState<Record<string, string>>({});
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [preview, setPreview] = useState<PreviewState>({
+    recording: null,
+    url: null,
+    filename: null,
+    loading: false,
+    error: null,
+  });
 
-  // ── Load recordings ──
   useEffect(() => {
     setCurrentPage("recordings");
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetchRecordings()
-      .then((data) => { if (!cancelled) { setRecordings(data); setLoading(false); } })
-      .catch(() => { if (!cancelled) { setError("Failed to load recordings. Please try again."); setLoading(false); } });
-    return () => { cancelled = true; };
-  }, [fetchRecordings, setCurrentPage]);
+  }, [setCurrentPage]);
 
-  // ── Delete handler ──
-  async function handleDelete(id: string) {
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const response = await listRecordings({
+          recordingRoot,
+          roomId: appliedRoomId || undefined,
+          folderName: appliedFolderName || undefined,
+        });
+
+        if (cancelled) return;
+
+        setRecordings(response.items);
+        setTotal(response.total);
+      } catch (loadError) {
+        if (cancelled) return;
+
+        setRecordings([]);
+        setTotal(0);
+        setError(loadError instanceof Error ? loadError.message : "Failed to load recordings.");
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appliedFolderName, appliedRoomId, recordingRoot, refreshKey]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) {
+        window.URL.revokeObjectURL(previewUrlRef.current);
+      }
+    };
+  }, []);
+
+  function updateBusyAction(recordingId: number, action?: ActionKind) {
+    const key = String(recordingId);
+    setBusyActionById((previous) => {
+      const next = { ...previous };
+      if (action) {
+        next[key] = action;
+      } else {
+        delete next[key];
+      }
+      return next;
+    });
+  }
+
+  function resetPreview() {
+    if (previewUrlRef.current) {
+      window.URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = null;
+    }
+
+    setPreview({
+      recording: null,
+      url: null,
+      filename: null,
+      loading: false,
+      error: null,
+    });
+  }
+
+  function handleApplyFilters(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAppliedRoomId(roomIdInput.trim());
+    setAppliedFolderName(folderNameInput.trim());
+  }
+
+  function handleClearFilters() {
+    setRoomIdInput("");
+    setFolderNameInput("");
+    setAppliedRoomId("");
+    setAppliedFolderName("");
+  }
+
+  async function handleDownload(recording: RecordingListItem) {
+    updateBusyAction(recording.id, "download");
+
     try {
-      await deleteRecording?.(id);
-      setRecordings((prev) => prev.filter((r) => r.id !== id));
-    } catch {
-      setError("Could not delete recording. Please try again.");
+      const file = await downloadRecordingFile(recording.id, {
+        folderName: recording.folderName,
+      });
+
+      downloadBlob(file.blob, file.filename);
+      setBanner({
+        kind: "success",
+        text: `Downloaded ${file.filename}.`,
+      });
+    } catch (downloadError) {
+      setBanner({
+        kind: "error",
+        text:
+          downloadError instanceof Error
+            ? downloadError.message
+            : "Failed to download recording.",
+      });
+    } finally {
+      updateBusyAction(recording.id);
     }
   }
 
-  // ── Filtered + sorted recordings ──
-  const displayed = recordings
-    .filter((r) => {
-      if (filter !== "all" && r.status !== filter) return false;
-      if (search.trim()) {
-        const q = search.toLowerCase();
-        return (
-          r.title.toLowerCase().includes(q) ||
-          r.roomId.toLowerCase().includes(q) ||
-          r.recordedBy.toLowerCase().includes(q) ||
-          r.participants.some((p) => p.toLowerCase().includes(q))
-        );
-      }
-      return true;
-    })
-    .sort((a, b) => {
-      if (sortBy === "date") return new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime();
-      if (sortBy === "duration") return b.durationSeconds - a.durationSeconds;
-      if (sortBy === "size") return (b.sizeBytes ?? 0) - (a.sizeBytes ?? 0);
-      return 0;
+  async function handlePreview(recording: RecordingListItem) {
+    resetPreview();
+    setPreview({
+      recording,
+      url: null,
+      filename: null,
+      loading: true,
+      error: null,
     });
+    updateBusyAction(recording.id, "preview");
 
-  const counts = {
-    all: recordings.length,
-    ready: recordings.filter((r) => r.status === "ready").length,
-    processing: recordings.filter((r) => r.status === "processing").length,
-    failed: recordings.filter((r) => r.status === "failed").length,
-  };
+    try {
+      const file = await downloadRecordingFile(recording.id, {
+        folderName: recording.folderName,
+      });
+      const objectUrl = window.URL.createObjectURL(file.blob);
+      previewUrlRef.current = objectUrl;
+
+      setPreview({
+        recording,
+        url: objectUrl,
+        filename: file.filename,
+        loading: false,
+        error: null,
+      });
+    } catch (previewError) {
+      const message =
+        previewError instanceof Error ? previewError.message : "Failed to load recording preview.";
+      setPreview({
+        recording,
+        url: null,
+        filename: null,
+        loading: false,
+        error: message,
+      });
+      setBanner({
+        kind: "error",
+        text: message,
+      });
+    } finally {
+      updateBusyAction(recording.id);
+    }
+  }
+
+  async function handleAnalyze(recording: RecordingListItem) {
+    updateBusyAction(recording.id, "analyze");
+
+    try {
+      const response = await analyzeRecording(recording.id, {
+        folderName: recording.folderName,
+        classes: DEFAULT_RECORDING_ANALYSIS_CLASSES,
+        sourceName: `recording-${recording.folderName}`,
+      });
+
+      const jobId = getRecordingAnalysisJobId(response);
+      const selectedFile = fileNameFromKey(response.selectedKey);
+      const summary = jobId
+        ? `AI job ${jobId} started for ${selectedFile}.`
+        : `AI analysis started for ${selectedFile}.`;
+
+      setAnalysisSummaryById((previous) => ({
+        ...previous,
+        [String(recording.id)]: summary,
+      }));
+      setBanner({
+        kind: "success",
+        text: summary,
+      });
+    } catch (analyzeError) {
+      setBanner({
+        kind: "error",
+        text:
+          analyzeError instanceof Error
+            ? analyzeError.message
+            : "Failed to start AI analysis.",
+      });
+    } finally {
+      updateBusyAction(recording.id);
+    }
+  }
 
   return (
     <>
@@ -778,258 +698,306 @@ export default function RecordingPage({
         @keyframes spin {
           to { transform: rotate(360deg); }
         }
-        @keyframes recordDot {
-          0%, 100% { opacity: 1; }
-          50%       { opacity: 0.3; }
-        }
-        @keyframes fadeUp {
-          from { opacity: 0; transform: translateY(16px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-
-        .rec-card-anim { animation: fadeUp 0.4s cubic-bezier(0.22,1,0.36,1) both; }
-
-        .filter-pill {
-          transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-          cursor: pointer;
-        }
-        .filter-pill:hover { background: rgba(255,255,255,0.08) !important; }
       `}</style>
 
       <div
-        className="rec-root flex flex-col w-full min-h-screen"
+        className="rec-root flex flex-col min-h-screen"
         style={{
           background: "linear-gradient(160deg, #07111f 0%, #060d1c 50%, #040a18 100%)",
           fontFamily: "'DM Sans', sans-serif",
         }}
       >
-        {/* ── Header ──────────────────────────────────────────────────────── */}
         <header
-          className="flex items-center justify-between px-5 py-3 flex-shrink-0 sticky top-0 z-40"
+          className="flex items-center justify-between px-5 py-3 sticky top-0 z-40"
           style={{
             borderBottom: "1px solid rgba(255,255,255,0.06)",
-            background: "rgba(5,10,25,0.8)",
+            background: "rgba(5,10,25,0.82)",
             backdropFilter: "blur(16px)",
           }}
         >
           <img src="/SixDX White.svg" alt="SixDX" style={{ height: 28 }} />
 
-          <span className="text-sm" style={{ color: "rgba(255,255,255,0.45)" }}>
-            Recordings
-          </span>
-
-          <button
-            onClick={() => navigate(-1)}
-            className="flex items-center gap-1.5 text-xs transition-opacity hover:opacity-70"
-            style={{
-              background: "none", border: "none", cursor: "pointer",
-              color: "rgba(255,255,255,0.4)",
-            }}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" strokeWidth="2.2"
-              strokeLinecap="round" strokeLinejoin="round">
-              <line x1="19" y1="12" x2="5" y2="12"/>
-              <polyline points="12 19 5 12 12 5"/>
-            </svg>
-            Back
-          </button>
-        </header>
-
-        {/* ── Content ─────────────────────────────────────────────────────── */}
-        <main className="flex-1 px-5 py-6 max-w-6xl mx-auto w-full">
-
-          {/* Page title + stats row */}
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
-            <div>
-              <h1 className="text-xl font-semibold text-white mb-1">
-                Recordings
-              </h1>
-              <p className="text-sm" style={{ color: "rgba(255,255,255,0.35)" }}>
-                {counts.all} total · {counts.ready} ready · {counts.processing} processing
-              </p>
-            </div>
-
-            {/* Sort control */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs" style={{ color: "rgba(255,255,255,0.3)" }}>Sort:</span>
-              {(["date", "duration", "size"] as const).map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setSortBy(s)}
-                  className="filter-pill px-3 py-1.5 rounded-full text-xs capitalize"
-                  style={{
-                    background: sortBy === s ? "rgba(30,107,255,0.25)" : "rgba(255,255,255,0.05)",
-                    border: `1px solid ${sortBy === s ? "rgba(79,179,255,0.4)" : "rgba(255,255,255,0.08)"}`,
-                    color: sortBy === s ? "#90caff" : "rgba(255,255,255,0.45)",
-                    fontFamily: "'DM Sans', sans-serif",
-                  }}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Search + filter bar */}
-          <div className="flex flex-col sm:flex-row gap-3 mb-6">
-            {/* Search */}
-            <div className="relative flex-1">
-              <svg
-                className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                width="14" height="14" viewBox="0 0 24 24" fill="none"
-                stroke="rgba(255,255,255,0.3)" strokeWidth="2.2"
-                strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8"/>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-              </svg>
-              <input
-                type="text"
-                placeholder="Search recordings…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-9 pr-4 py-2.5 rounded-xl text-sm outline-none transition-all duration-200"
-                style={{
-                  background: "rgba(255,255,255,0.05)",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  color: "rgba(255,255,255,0.8)",
-                  fontFamily: "'DM Sans', sans-serif",
-                }}
-                onFocus={(e) => {
-                  e.target.style.borderColor = "rgba(255,255,255,0.3)";
-                  e.target.style.background = "rgba(255,255,255,0.08)";
-                }}
-                onBlur={(e) => {
-                  e.target.style.borderColor = "rgba(255,255,255,0.1)";
-                  e.target.style.background = "rgba(255,255,255,0.05)";
-                }}
-              />
-            </div>
-
-            {/* Status filter pills */}
-            <div className="flex items-center gap-2 flex-wrap">
-              {(["all", "ready", "processing", "failed"] as const).map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setFilter(f)}
-                  className="filter-pill px-3 py-2 rounded-xl text-xs capitalize flex items-center gap-1.5"
-                  style={{
-                    background: filter === f ? "rgba(30,107,255,0.2)" : "rgba(255,255,255,0.04)",
-                    border: `1px solid ${filter === f ? "rgba(79,179,255,0.35)" : "rgba(255,255,255,0.08)"}`,
-                    color: filter === f ? "#90caff" : "rgba(255,255,255,0.4)",
-                    fontFamily: "'DM Sans', sans-serif",
-                  }}
-                >
-                  {f}
-                  <span
-                    className="px-1.5 py-0.5 rounded-full text-xs"
-                    style={{
-                      background: filter === f ? "rgba(79,179,255,0.2)" : "rgba(255,255,255,0.08)",
-                      color: filter === f ? "#90caff" : "rgba(255,255,255,0.3)",
-                      fontSize: "0.6rem",
-                    }}
-                  >
-                    {counts[f]}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* ── States ── */}
-
-          {/* Loading */}
-          {loading && (
-            <div className="flex flex-col items-center justify-center py-24 gap-4">
-              <div style={{
-                width: 36, height: 36,
-                border: "2px solid rgba(79,179,255,0.15)",
-                borderTopColor: "#4fb3ff",
-                borderRadius: "50%",
-                animation: "spin 0.85s linear infinite",
-              }} />
-              <p className="text-sm" style={{ color: "rgba(255,255,255,0.3)" }}>
-                Loading recordings…
-              </p>
-            </div>
-          )}
-
-          {/* Error */}
-          {!loading && error && (
-            <div
-              className="flex items-center gap-3 px-4 py-3 rounded-2xl mb-6"
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setRefreshKey((value) => value + 1)}
+              className="px-3 py-2 rounded-xl text-xs transition-opacity hover:opacity-80"
               style={{
-                background: "rgba(239,68,68,0.1)",
-                border: "1px solid rgba(239,68,68,0.25)",
-                color: "rgba(255,160,160,0.9)",
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                color: "rgba(255,255,255,0.72)",
+                cursor: "pointer",
               }}
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2.2"
-                strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="12" y1="8" x2="12" y2="12"/>
-                <line x1="12" y1="16" x2="12.01" y2="16"/>
-              </svg>
-              <span className="text-sm">{error}</span>
-              <button
-                onClick={() => setError(null)}
-                style={{ marginLeft: "auto", background: "none", border: "none",
-                  color: "inherit", cursor: "pointer", opacity: 0.5 }}
-              >×</button>
-            </div>
-          )}
+              Refresh
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(-1)}
+              className="px-3 py-2 rounded-xl text-xs transition-opacity hover:opacity-80"
+              style={{
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                color: "rgba(255,255,255,0.72)",
+                cursor: "pointer",
+              }}
+            >
+              Back
+            </button>
+          </div>
+        </header>
 
-          {/* Empty */}
-          {!loading && !error && displayed.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-24 gap-3">
-              <div
-                className="flex items-center justify-center rounded-2xl"
-                style={{
-                  width: 56, height: 56,
-                  background: "rgba(30,107,255,0.1)",
-                  border: "1px solid rgba(79,179,255,0.15)",
-                }}
-              >
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
-                  stroke="rgba(79,179,255,0.4)" strokeWidth="1.8"
-                  strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10"/>
-                  <polygon points="10 8 16 12 10 16 10 8"/>
-                </svg>
+        <main className="flex-1 w-full max-w-7xl mx-auto px-5 py-6">
+          <div className="flex flex-col gap-6">
+            <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+              <div>
+                <h1 className="text-2xl font-semibold text-white">Recordings</h1>
+                <p className="text-sm mt-2" style={{ color: "rgba(255,255,255,0.38)" }}>
+                  Database-backed recording metadata with on-demand secure download and AI analysis.
+                </p>
+                <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.3)" }}>
+                  Showing {recordings.length} of {total} entries in{" "}
+                  {ROOT_OPTIONS.find((option) => option.value === recordingRoot)?.label}.
+                </p>
               </div>
-              <p className="text-sm" style={{ color: "rgba(255,255,255,0.3)" }}>
-                {search ? "No recordings match your search." : "No recordings yet."}
-              </p>
-            </div>
-          )}
 
-          {/* Grid */}
-          {!loading && !error && displayed.length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {displayed.map((rec, i) => (
-                <div
-                  key={rec.id}
-                  className="rec-card-anim"
-                  style={{ animationDelay: `${i * 0.06}s` }}
-                >
-                  <RecordingCard
-                    recording={rec}
-                    onPlay={setPlayingRecording}
-                    onDelete={handleDelete}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {ROOT_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setRecordingRoot(option.value)}
+                    className="text-left rounded-3xl px-4 py-3 transition-all duration-150"
+                    style={{
+                      background:
+                        recordingRoot === option.value
+                          ? "linear-gradient(to bottom, rgba(30,107,255,0.22), rgba(79,179,255,0.1))"
+                          : "rgba(255,255,255,0.04)",
+                      border: `1px solid ${
+                        recordingRoot === option.value
+                          ? "rgba(79,179,255,0.32)"
+                          : "rgba(255,255,255,0.08)"
+                      }`,
+                      color:
+                        recordingRoot === option.value
+                          ? "#90caff"
+                          : "rgba(255,255,255,0.78)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <p className="font-medium text-sm">{option.label}</p>
+                    <p className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.42)" }}>
+                      {option.hint}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <form
+              onSubmit={handleApplyFilters}
+              className="rounded-[28px] p-4"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr_auto] gap-3">
+                <div>
+                  <label
+                    className="block text-xs mb-2"
+                    style={{ color: "rgba(255,255,255,0.38)" }}
+                  >
+                    Room ID
+                  </label>
+                  <input
+                    type="text"
+                    value={roomIdInput}
+                    placeholder="ABC-123-XYZ"
+                    onChange={(event) => setRoomIdInput(formatRoomCode(event.target.value))}
+                    maxLength={11}
+                    className="w-full px-4 py-3 rounded-2xl text-sm outline-none"
+                    style={{
+                      background: "rgba(255,255,255,0.05)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      color: "rgba(255,255,255,0.86)",
+                    }}
                   />
                 </div>
-              ))}
-            </div>
-          )}
+
+                <div>
+                  <label
+                    className="block text-xs mb-2"
+                    style={{ color: "rgba(255,255,255,0.38)" }}
+                  >
+                    Folder name
+                  </label>
+                  <input
+                    type="text"
+                    value={folderNameInput}
+                    placeholder="meeting-janedoe-20260511T120000Z"
+                    onChange={(event) => setFolderNameInput(event.target.value)}
+                    className="w-full px-4 py-3 rounded-2xl text-sm outline-none"
+                    style={{
+                      background: "rgba(255,255,255,0.05)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      color: "rgba(255,255,255,0.86)",
+                    }}
+                  />
+                </div>
+
+                <div className="flex items-end gap-2">
+                  <button
+                    type="submit"
+                    className="px-4 py-3 rounded-2xl text-sm"
+                    style={{
+                      background: "linear-gradient(to bottom, #ffffff 0%, #dce8ff 100%)",
+                      color: "#0a20bb",
+                      fontFamily: "'Ethnocentric', sans-serif",
+                      letterSpacing: "0.04em",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Apply
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleClearFilters}
+                    className="px-4 py-3 rounded-2xl text-sm"
+                    style={{
+                      background: "rgba(255,255,255,0.06)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      color: "rgba(255,255,255,0.7)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+            </form>
+
+            {banner && (
+              <div
+                className="flex items-center gap-3 rounded-2xl px-4 py-3"
+                style={{
+                  background:
+                    banner.kind === "success"
+                      ? "rgba(34,197,94,0.1)"
+                      : "rgba(239,68,68,0.1)",
+                  border: `1px solid ${
+                    banner.kind === "success"
+                      ? "rgba(34,197,94,0.22)"
+                      : "rgba(239,68,68,0.25)"
+                  }`,
+                  color:
+                    banner.kind === "success"
+                      ? "rgba(170,245,195,0.92)"
+                      : "rgba(255,160,160,0.92)",
+                }}
+              >
+                <span className="text-sm">{banner.text}</span>
+                <button
+                  type="button"
+                  onClick={() => setBanner(null)}
+                  style={{
+                    marginLeft: "auto",
+                    background: "none",
+                    border: "none",
+                    color: "inherit",
+                    cursor: "pointer",
+                    opacity: 0.65,
+                  }}
+                >
+                  x
+                </button>
+              </div>
+            )}
+
+            {loading && (
+              <div className="flex flex-col items-center justify-center py-28 gap-4">
+                <div
+                  style={{
+                    width: 38,
+                    height: 38,
+                    border: "2px solid rgba(79,179,255,0.15)",
+                    borderTopColor: "#4fb3ff",
+                    borderRadius: "50%",
+                    animation: "spin 0.85s linear infinite",
+                  }}
+                />
+                <p className="text-sm" style={{ color: "rgba(255,255,255,0.34)" }}>
+                  Loading recordings...
+                </p>
+              </div>
+            )}
+
+            {!loading && error && (
+              <div
+                className="rounded-[28px] p-6"
+                style={{
+                  background: "rgba(239,68,68,0.08)",
+                  border: "1px solid rgba(239,68,68,0.2)",
+                }}
+              >
+                <p className="text-sm" style={{ color: "rgba(255,160,160,0.92)" }}>
+                  {error}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setRefreshKey((value) => value + 1)}
+                  className="mt-4 px-4 py-2 rounded-2xl text-sm"
+                  style={{
+                    background: "rgba(255,255,255,0.08)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    color: "rgba(255,255,255,0.8)",
+                    cursor: "pointer",
+                  }}
+                >
+                  Try again
+                </button>
+              </div>
+            )}
+
+            {!loading && !error && recordings.length === 0 && (
+              <div
+                className="rounded-[28px] p-8 text-center"
+                style={{
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                }}
+              >
+                <p className="text-sm" style={{ color: "rgba(255,255,255,0.36)" }}>
+                  No recordings matched the current filters.
+                </p>
+              </div>
+            )}
+
+            {!loading && !error && recordings.length > 0 && (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                {recordings.map((recording) => (
+                  <RecordingCard
+                    key={recording.id}
+                    recording={recording}
+                    busyAction={busyActionById[String(recording.id)]}
+                    analysisSummary={analysisSummaryById[String(recording.id)]}
+                    onPreview={handlePreview}
+                    onDownload={handleDownload}
+                    onAnalyze={handleAnalyze}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </main>
       </div>
 
-      {/* ── Player modal ── */}
-      {playingRecording && (
-        <PlayerModal
-          recording={playingRecording}
-          onClose={() => setPlayingRecording(null)}
+      {preview.recording && (
+        <PreviewModal
+          preview={preview}
+          onClose={resetPreview}
+          onDownload={handleDownload}
+          downloadBusy={busyActionById[String(preview.recording.id)] === "download"}
         />
       )}
     </>

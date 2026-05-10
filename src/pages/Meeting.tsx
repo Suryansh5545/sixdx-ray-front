@@ -99,6 +99,16 @@ export default function Meeting({ roomId, localName = "You" }: MeetingProps) {
     setCurrentPage("meetings");
   }, [setCurrentPage]);
 
+  useEffect(() => {
+    if (!error || error === "media") return;
+
+    const timeoutId = window.setTimeout(() => {
+      navigate("/room", { replace: true });
+    }, 1500);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [error, navigate]);
+
   // ── Recording timer ──
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
@@ -137,7 +147,7 @@ export default function Meeting({ roomId, localName = "You" }: MeetingProps) {
 
   const handleEndCall = useCallback(() => {
     disconnect();
-    navigate("/");
+    navigate("/room", { replace: true });
   }, [disconnect, navigate]);
 
   const displayedError = error && error !== dismissedError ? ERROR_MESSAGES[error] ?? null : null;

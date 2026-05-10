@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
+import { createAuthSession, type AuthResponse } from "../lib/auth";
+import { buildServerUrl } from "../lib/server";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface InputFieldProps {
@@ -16,23 +18,23 @@ interface InputFieldProps {
 }
 
 interface FormState {
-  username: string;
+  identifier: string;
   password: string;
 }
 
 interface FormErrors {
-  username: string;
+  identifier: string;
   password: string;
 }
 
 type FormStatus = "idle" | "validating" | "loading" | "success" | "error";
 
 // ─── Validation ───────────────────────────────────────────────────────────────
-const USERNAME_REGEX = /^[a-zA-Z][a-zA-Z0-9_]{2,20}$/;
+const IDENTIFIER_REGEX = /^[a-zA-Z][a-zA-Z0-9_]{2,20}$/;
 
-function validateUsername(value: string): string {
+function validateIdentifier(value: string): string {
   if (!value.trim()) return "This field is required";
-  if (!USERNAME_REGEX.test(value))
+  if (!IDENTIFIER_REGEX.test(value))
     return "3–21 chars, start with a letter, letters/numbers/underscore only";
   return "";
 }
@@ -172,11 +174,11 @@ function MeshGradient() {
 
 export default function LandingPage() {
   const navigate = useNavigate();
-  const { setUsername, setCurrentPage, setIsTestLogin } = useAppContext();
+  const { setIdentifier, setCurrentPage, setIsTestLogin, setAuthSession } = useAppContext();
 
-  const [form, setForm]       = useState<FormState>({ username: "", password: "" });
-  const [errors, setErrors]   = useState<FormErrors>({ username: "", password: "" });
-  const [touched, setTouched] = useState<Record<keyof FormState, boolean>>({ username: false, password: false });
+  const [form, setForm]       = useState<FormState>({ identifier: "", password: "" });
+  const [errors, setErrors]   = useState<FormErrors>({ identifier: "", password: "" });
+  const [touched, setTouched] = useState<Record<keyof FormState, boolean>>({ identifier: false, password: false });
   const [status, setStatus]   = useState<FormStatus>("idle");
   const [toast, setToast]     = useState<string>("");
   const [mounted, setMounted] = useState(false);
@@ -197,7 +199,7 @@ export default function LandingPage() {
 
   // ── Real-time validation ──
   const validate = useCallback((field: keyof FormState, value: string): string => {
-    if (field === "username") return validateUsername(value);
+    if (field === "identifier") return validateIdentifier(value);
     if (field === "password") return validatePassword(value);
     return "";
   }, []);
@@ -218,9 +220,9 @@ export default function LandingPage() {
   }
 
   // Derive form validity
-  const usernameError = validate("username", form.username);
+  const identifierError = validate("identifier", form.identifier);
   const passwordError = validate("password", form.password);
-  const isFormValid   = !usernameError && !passwordError;
+  const isFormValid   = !identifierError && !passwordError;
   const isLoading     = status === "loading";
 
   // ── Submission ──
@@ -230,13 +232,13 @@ export default function LandingPage() {
     // Mark all fields touched & run full validation
     setStatus("validating");
     const newErrors: FormErrors = {
-      username: validate("username", form.username),
+      identifier: validate("identifier", form.identifier),
       password: validate("password", form.password),
     };
     setErrors(newErrors);
-    setTouched({ username: true, password: true });
+    setTouched({ identifier: true, password: true });
 
-    if (newErrors.username || newErrors.password) {
+    if (newErrors.identifier || newErrors.password) {
       setStatus("idle");
       return;
     }
@@ -245,9 +247,10 @@ export default function LandingPage() {
     setStatus("loading");
 
     // Test login bypass: pratham / 11111 (for reaching meeting/recordings without API)
-    const isTestLogin = form.username === "pratham" && form.password === "11111";
+    const isTestLogin = form.identifier === "pratham" && form.password === "11111";
     if (isTestLogin) {
-      setUsername(form.username);
+      setAuthSession(null);
+      setIdentifier(form.identifier);
       setIsTestLogin(true);
       setStatus("success");
       navigate("/organizations");
@@ -258,15 +261,16 @@ export default function LandingPage() {
     setIsTestLogin(false);
 
     try {
-      const res = await fetch("/api/login", {
+      const res = await fetch(buildServerUrl("/auth/login"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: form.username, password: form.password }),
+        body: JSON.stringify({ identifier: form.identifier, password: form.password }),
       });
 
       if (!res.ok) throw new Error("Login failed");
 
-      setUsername(form.username);
+      const authResponse = await res.json() as AuthResponse;
+      setAuthSession(createAuthSession(authResponse));
       setStatus("success");
       navigate("/organizations");
     } catch {
@@ -471,15 +475,15 @@ export default function LandingPage() {
                 className={`space-y-2 mb-4 ${mounted ? "anim-inputs" : "opacity-0"}`}
               >
                 <PillInput
-                  id="username"
+                  id="identifier"
                   type="text"
-                  placeholder="Username"
-                  value={form.username}
-                  onChange={handleChange("username")}
+                  placeholder="Identifier"
+                  value={form.identifier}
+                  onChange={handleChange("identifier")}
                   autoComplete="username"
-                  error={errors.username}
-                  touched={touched.username}
-                  onBlur={() => handleBlur("username")}
+                  error={errors.identifier}
+                  touched={touched.identifier}
+                  onBlur={() => handleBlur("identifier")}
                 />
                 <PillInput
                   id="password"
@@ -498,7 +502,7 @@ export default function LandingPage() {
               <div className={`mb-1 ${mounted ? "anim-btn" : "opacity-0"}`}>
                 <button
                   type="submit"
-                  disabled={isLoading || (touched.username && touched.password && !isFormValid)}
+                  disabled={isLoading || (touched.identifier && touched.password && !isFormValid)}
                   className="login-btn w-full py-4 rounded-full text-sm font-semibold flex items-center justify-center gap-2"
                   style={{
                     fontFamily: "'Ethnocentric', sans-serif",
@@ -538,4 +542,3 @@ export default function LandingPage() {
     </>
   );
 }
-

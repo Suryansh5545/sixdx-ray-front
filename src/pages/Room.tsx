@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
+import { createMeetingRoom } from "../lib/meeting/roomService";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Mode = "idle" | "join" | "create";
@@ -9,9 +10,12 @@ type Status = "idle" | "loading" | "error";
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function generateRoomCode(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  return Array.from({ length: 9 }, (_, i) =>
-    (i === 3 || i === 6 ? "-" : chars[Math.floor(Math.random() * chars.length)])
-  ).join("");
+  return Array.from({ length: 3 }, () =>
+    Array.from(
+      { length: 3 },
+      () => chars[Math.floor(Math.random() * chars.length)]
+    ).join("")
+  ).join("-");
 }
 
 // Validate room code: XXX-XXX-XXX (letters + numbers, hyphens allowed)
@@ -269,12 +273,10 @@ function CameraPreview({
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function Room() {
   const navigate = useNavigate();
-  const { setUsername, setSelectedOrg, setIsTestLogin } = useAppContext();
+  const { logout } = useAppContext();
 
   function handleLogout() {
-    setUsername(null);
-    setSelectedOrg(null);
-    setIsTestLogin(false);
+    logout();
     navigate("/");
   }
 
@@ -284,6 +286,8 @@ export default function Room() {
   const [joinCodeTouched, setJoinCodeTouched] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
   const [generatedCode] = useState(generateRoomCode);
+  const [createdRoomCode, setCreatedRoomCode] = useState<string | null>(null);
+  const [createError, setCreateError] = useState("");
   const [mounted, setMounted] = useState(false);
 
   const { stream, error: camError, isMuted, isCameraOff, toggleMic, toggleCamera } =
@@ -293,6 +297,34 @@ export default function Room() {
     const t = setTimeout(() => setMounted(true), 60);
     return () => clearTimeout(t);
   }, []);
+
+  async function reserveRoom() {
+    const roomCode = await createMeetingRoom();
+    setCreatedRoomCode(roomCode);
+    return roomCode;
+  }
+
+  async function openCreateMode() {
+    setMode("create");
+    setStatus("loading");
+    setCreateError("");
+    setCreatedRoomCode(null);
+
+    try {
+      await reserveRoom();
+      setStatus("idle");
+    } catch {
+      setStatus("error");
+      setCreateError("Could not create a meeting room. Please try again.");
+    }
+  }
+
+  function resetCreateMode() {
+    setMode("idle");
+    setStatus("idle");
+    setCreateError("");
+    setCreatedRoomCode(null);
+  }
 
   // ── Join code validation ──
   function handleCodeInput(e: React.ChangeEvent<HTMLInputElement>) {
@@ -315,15 +347,15 @@ export default function Room() {
   // ── Create meeting ──
   async function handleCreate() {
     setStatus("loading");
+    setCreateError("");
     try {
-      // TODO: call your backend to reserve the room
-      // e.g. await api.post("/rooms", { code: generatedCode });
-      await new Promise((r) => setTimeout(r, 600)); // simulate latency
+      const roomCode = createdRoomCode ?? (await reserveRoom());
       navigate("/meetings", {
-        state: { roomCode: generatedCode, isMuted, isCameraOff },
+        state: { roomCode, isMuted, isCameraOff },
       });
     } catch {
       setStatus("error");
+      setCreateError("Could not create a meeting room. Please try again.");
     }
   }
 
@@ -334,22 +366,14 @@ export default function Room() {
       setJoinCodeError("Enter a valid code (e.g. ABC-123-XYZ)");
       return;
     }
-    setStatus("loading");
-    try {
-      // TODO: validate room exists on your backend
-      // e.g. await api.get(`/rooms/${joinCode}`);
-      await new Promise((r) => setTimeout(r, 600));
-      navigate("/meetings", {
-        state: { roomCode: joinCode, isMuted, isCameraOff },
-      });
-    } catch {
-      setStatus("error");
-      setJoinCodeError("Room not found. Check the code and try again.");
-    }
+    navigate("/meetings", {
+      state: { roomCode: joinCode.toUpperCase(), isMuted, isCameraOff },
+    });
   }
 
   const isLoading = status === "loading";
-  const joinValid = "D8I-7834";
+  const displayRoomCode =
+    createdRoomCode ?? (isLoading ? "Creating..." : createError ? "Unavailable" : generatedCode);
 
   return (
     <>
@@ -548,7 +572,7 @@ export default function Room() {
                     }}
                   >
                     {mode === "idle"  && "Ready to meet?"}
-                    {mode === "create" && "Your meeting is ready"}
+                    {mode === "create" && (isLoading ? "Preparing your meeting" : "Your meeting is ready")}
                     {mode === "join"  && "Join a meeting"}
                   </h1>
                   <p
@@ -559,7 +583,9 @@ export default function Room() {
                     }}
                   >
                     {mode === "idle"   && "Create a new room or join with a code."}
-                    {mode === "create" && "Share the code below with others to invite them."}
+                    {mode === "create" && (isLoading
+                      ? "Creating a room and reserving its code."
+                      : "Share the code below with others to invite them.")}
                     {mode === "join"   && "Enter the meeting code you received."}
                   </p>
                 </div>
@@ -569,7 +595,7 @@ export default function Room() {
                   <div className="flex flex-col gap-3">
                     {/* Create */}
                     <button
-                      onClick={() => setMode("create")}
+                      onClick={() => { void openCreateMode(); }}
                       className="mode-btn w-full py-4 rounded-full text-sm font-semibold flex items-center justify-center gap-2.5"
                       style={{
                         fontFamily: "'Ethnocentric', sans-serif",
@@ -656,18 +682,20 @@ export default function Room() {
                             letterSpacing: "0.12em",
                           }}
                         >
-                          {generatedCode}
+                          {displayRoomCode}
                         </p>
                       </div>
                       {/* Copy button */}
                       <button
-                        onClick={() => navigator.clipboard.writeText(generatedCode)}
+                        onClick={() => createdRoomCode && navigator.clipboard.writeText(createdRoomCode)}
+                        disabled={!createdRoomCode}
                         className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs transition-opacity hover:opacity-80"
                         style={{
                           background: "rgba(30,107,255,0.2)",
                           border: "1px solid rgba(79,179,255,0.3)",
                           color: "#90caff",
-                          cursor: "pointer",
+                          cursor: createdRoomCode ? "pointer" : "not-allowed",
+                          opacity: createdRoomCode ? 1 : 0.5,
                           fontFamily: "'DM Sans', sans-serif",
                         }}
                         aria-label="Copy meeting code"
@@ -712,7 +740,7 @@ export default function Room() {
 
                     {/* Back */}
                     <button
-                      onClick={() => setMode("idle")}
+                      onClick={resetCreateMode}
                       className="back-btn text-xs text-center w-full"
                       style={{
                         background: "none", border: "none", cursor: "pointer",
@@ -772,7 +800,7 @@ export default function Room() {
                     {/* Join button */}
                     <button
                       onClick={handleJoin}
-                      disabled={isLoading || (!joinValid && joinCodeTouched)}
+                      disabled={isLoading}
                       className="primary-btn w-full py-4 rounded-full text-sm font-semibold flex items-center justify-center gap-2"
                       style={{
                         fontFamily: "'Ethnocentric', sans-serif",
@@ -815,7 +843,7 @@ export default function Room() {
                 {/* Global error */}
                 {status === "error" && mode !== "join" && (
                   <p className="text-xs text-center" style={{ color: "rgba(255,160,160,0.9)" }}>
-                    Something went wrong. Please try again.
+                    {createError || "Something went wrong. Please try again."}
                   </p>
                 )}
               </div>

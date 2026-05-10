@@ -52,7 +52,7 @@ function MeshGradient() {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { setCurrentPage, selectedOrg, username } = useAppContext();
+  const { setCurrentPage, selectedOrg, identifier } = useAppContext();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -143,7 +143,7 @@ export default function Dashboard() {
             <div className="w-full flex flex-col gap-4">
               <div className={`mb-4 text-center ${mounted ? "anim-title" : "opacity-0"}`}>
                 <h1 className="text-2xl font-medium text-white/90 mb-1" style={{ letterSpacing: "0.01em" }}>
-                  Welcome, {username || 'User'}
+                  Welcome, {identifier || 'User'}
                 </h1>
                 <p className="text-sm text-white/70">
                   {selectedOrg ? `Connected to ${selectedOrg.charAt(0).toUpperCase() + selectedOrg.slice(1)}` : 'Dashboard Hub'}

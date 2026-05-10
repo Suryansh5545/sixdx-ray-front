@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import { buildServerUrl } from "../lib/server";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Step = "email" | "verify" | "password";
@@ -131,7 +132,7 @@ export default function Signup() {
     if (validateEmail(email)) return;
     setStatus("loading");
     try {
-      const res = await fetch("/api/auth/send-code", {
+      const res = await fetch(buildServerUrl("/api/auth/send-code"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
@@ -151,7 +152,7 @@ export default function Signup() {
     if (validateCode(code)) return;
     setStatus("loading");
     try {
-      const res = await fetch("/api/auth/verify-code", {
+      const res = await fetch(buildServerUrl("/api/auth/verify-code"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, code }),
@@ -172,7 +173,7 @@ export default function Signup() {
     if (validatePassword(password) || validateConfirm(password, confirm)) return;
     setStatus("loading");
     try {
-      const res = await fetch("/api/auth/register", {
+      const res = await fetch(buildServerUrl("/api/auth/register"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
