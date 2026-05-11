@@ -931,22 +931,22 @@ function RecordingCard({
   const canAnalyze = selectedClassesCount > 0 && !isBusy;
 
   return (
-    <div
-      className="rounded-3xl p-5 flex flex-col gap-4"
+    <article
+      className="rounded-[24px] p-4 flex flex-col gap-4"
       style={{
-        background: "linear-gradient(160deg, rgba(10,18,40,0.92), rgba(6,12,28,0.96))",
-        border: "1px solid rgba(255,255,255,0.07)",
-        boxShadow: "0 12px 32px rgba(0,10,60,0.3)",
+        background: "rgba(7,12,24,0.78)",
+        border: "1px solid rgba(255,255,255,0.08)",
+        boxShadow: "0 10px 24px rgba(0,10,40,0.18)",
       }}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex flex-wrap items-center gap-2 mb-3">
+      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-2">
             <span
               className="px-2.5 py-1 rounded-full text-[11px]"
               style={{
-                background: "rgba(79,179,255,0.14)",
-                border: "1px solid rgba(79,179,255,0.22)",
+                background: "rgba(79,179,255,0.1)",
+                border: "1px solid rgba(79,179,255,0.18)",
                 color: "#90caff",
               }}
             >
@@ -955,130 +955,99 @@ function RecordingCard({
             <span
               className="px-2.5 py-1 rounded-full text-[11px]"
               style={{
-                background: "rgba(255,255,255,0.06)",
+                background: "rgba(255,255,255,0.04)",
                 border: "1px solid rgba(255,255,255,0.08)",
-                color: "rgba(255,255,255,0.48)",
+                color: "rgba(255,255,255,0.56)",
               }}
             >
               {roomTypeLabel(recording.roomType)}
             </span>
           </div>
 
-          <h2 className="text-lg font-semibold text-white">{recording.roomId}</h2>
-          <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.45)" }}>
+          <h2 className="text-lg font-semibold text-white tracking-tight">{recording.roomId}</h2>
+          <p
+            className="text-sm mt-1 truncate"
+            style={{ color: "rgba(255,255,255,0.46)" }}
+            title={recording.folderName}
+          >
             {recording.folderName}
           </p>
-        </div>
 
-        <div
-          className="rounded-2xl px-3 py-2 text-right"
-          style={{
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(255,255,255,0.08)",
-          }}
-        >
-          <p className="text-[11px]" style={{ color: "rgba(255,255,255,0.32)" }}>
-            CREATED
-          </p>
-          <p className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.72)" }}>
-            {formatDate(recording.createdAt)}
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 text-sm">
-        <div
-          className="rounded-2xl p-3"
-          style={{
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(255,255,255,0.06)",
-          }}
-        >
-          <p className="text-[11px] mb-1" style={{ color: "rgba(255,255,255,0.3)" }}>
-            STORAGE
-          </p>
-          <p style={{ color: "rgba(255,255,255,0.82)" }}>
-            {recording.storageBucket || "No bucket recorded"}
-          </p>
-          <p
-            className="text-xs mt-2"
-            style={{ color: "rgba(255,255,255,0.36)", fontFamily: "monospace" }}
-          >
-            {truncateMiddle(recording.pathPrefix)}
-          </p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
           <div
-            className="rounded-2xl p-3"
-            style={{
-              background: "rgba(255,255,255,0.03)",
-              border: "1px solid rgba(255,255,255,0.06)",
-            }}
+            className="flex flex-wrap gap-x-4 gap-y-2 mt-3 text-xs"
+            style={{ color: "rgba(255,255,255,0.6)" }}
           >
-            <p className="text-[11px] mb-1" style={{ color: "rgba(255,255,255,0.3)" }}>
-              CREATOR
-            </p>
-            <p className="text-sm" style={{ color: "rgba(255,255,255,0.82)" }}>
-              User #{recording.createdByUserId}
-            </p>
-          </div>
-          <div
-            className="rounded-2xl p-3"
-            style={{
-              background: "rgba(255,255,255,0.03)",
-              border: "1px solid rgba(255,255,255,0.06)",
-            }}
-          >
-            <p className="text-[11px] mb-1" style={{ color: "rgba(255,255,255,0.3)" }}>
-              EGRESS
-            </p>
-            <p className="text-sm" style={{ color: "rgba(255,255,255,0.82)" }}>
-              {recording.autoTrackEgressEnabled ? "Tracks on" : "Tracks off"}
-            </p>
-            <p className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.42)" }}>
+            <span>Created {formatDate(recording.createdAt)}</span>
+            <span>User #{recording.createdByUserId}</span>
+            <span>
+              {recording.autoTrackEgressEnabled ? "Tracks on" : "Tracks off"} /{" "}
               {recording.roomCompositeEgressEnabled ? "Composite on" : "Composite off"}
-            </p>
+            </span>
           </div>
         </div>
 
-        {(recording.trackRecordingTemplate || recording.compositeRecordingTemplate) && (
-          <div
-            className="rounded-2xl p-3"
+        <div className="flex flex-wrap gap-2 lg:justify-end">
+          <button
+            type="button"
+            onClick={() => onPreview(recording)}
+            disabled={isBusy}
+            className="px-3 py-2 rounded-2xl text-xs transition-opacity hover:opacity-80"
             style={{
-              background: "rgba(255,255,255,0.03)",
-              border: "1px solid rgba(255,255,255,0.06)",
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.1)",
+              color: "rgba(255,255,255,0.82)",
+              cursor: isBusy ? "not-allowed" : "pointer",
+              fontFamily: "'DM Sans', sans-serif",
             }}
           >
-            <p className="text-[11px] mb-2" style={{ color: "rgba(255,255,255,0.3)" }}>
-              TEMPLATES
-            </p>
-            {recording.trackRecordingTemplate && (
-              <p
-                className="text-xs"
-                style={{ color: "rgba(255,255,255,0.42)", fontFamily: "monospace" }}
-              >
-                Track: {truncateMiddle(recording.trackRecordingTemplate, 68)}
-              </p>
-            )}
-            {recording.compositeRecordingTemplate && (
-              <p
-                className="text-xs mt-2"
-                style={{ color: "rgba(255,255,255,0.42)", fontFamily: "monospace" }}
-              >
-                Composite: {truncateMiddle(recording.compositeRecordingTemplate, 68)}
-              </p>
-            )}
-          </div>
-        )}
+            {busyAction === "preview" ? "Loading..." : "Preview"}
+          </button>
+          <button
+            type="button"
+            onClick={() => onDownload(recording)}
+            disabled={isBusy}
+            className="px-3 py-2 rounded-2xl text-xs transition-opacity hover:opacity-80"
+            style={{
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.1)",
+              color: "rgba(255,255,255,0.82)",
+              cursor: isBusy ? "not-allowed" : "pointer",
+              fontFamily: "'DM Sans', sans-serif",
+            }}
+          >
+            {busyAction === "download" ? "Saving..." : "Download"}
+          </button>
+          <button
+            type="button"
+            onClick={() => onAnalyze(recording)}
+            disabled={!canAnalyze}
+            className="px-3 py-2 rounded-2xl text-xs transition-opacity hover:opacity-80"
+            style={{
+              background: canAnalyze ? "#edf4ff" : "rgba(255,255,255,0.06)",
+              border: canAnalyze
+                ? "1px solid rgba(255,255,255,0.1)"
+                : "1px solid rgba(255,255,255,0.1)",
+              color: canAnalyze ? "#1638b7" : "rgba(255,255,255,0.45)",
+              cursor: canAnalyze ? "pointer" : "not-allowed",
+              fontFamily: "'DM Sans', sans-serif",
+              fontWeight: 600,
+            }}
+          >
+            {busyAction === "analyze"
+              ? "Running..."
+              : selectedClassesCount > 0
+                ? `Run AI (${selectedClassesCount})`
+                : "Run AI"}
+          </button>
+        </div>
       </div>
 
       {analysisSummary && (
         <div
           className="rounded-2xl px-3 py-2 text-xs"
           style={{
-            background: "rgba(34,197,94,0.12)",
-            border: "1px solid rgba(34,197,94,0.25)",
+            background: "rgba(34,197,94,0.08)",
+            border: "1px solid rgba(34,197,94,0.18)",
             color: "rgba(170,245,195,0.92)",
           }}
         >
@@ -1086,60 +1055,53 @@ function RecordingCard({
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-2 mt-auto">
-        <button
-          type="button"
-          onClick={() => onPreview(recording)}
-          disabled={isBusy}
-          className="px-3 py-2 rounded-2xl text-xs transition-opacity hover:opacity-80"
-          style={{
-            background: "rgba(255,255,255,0.08)",
-            border: "1px solid rgba(255,255,255,0.12)",
-            color: "rgba(255,255,255,0.82)",
-            cursor: isBusy ? "not-allowed" : "pointer",
-            fontFamily: "'DM Sans', sans-serif",
-          }}
+      <details
+        className="rounded-2xl px-3 py-2"
+        style={{
+          background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.06)",
+        }}
+      >
+        <summary
+          className="text-xs cursor-pointer"
+          style={{ color: "rgba(255,255,255,0.72)" }}
         >
-          {busyAction === "preview" ? "Loading..." : "Preview"}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onDownload(recording)}
-          disabled={isBusy}
-          className="px-3 py-2 rounded-2xl text-xs transition-opacity hover:opacity-80"
-          style={{
-            background: "rgba(30,107,255,0.2)",
-            border: "1px solid rgba(79,179,255,0.28)",
-            color: "#90caff",
-            cursor: isBusy ? "not-allowed" : "pointer",
-            fontFamily: "'DM Sans', sans-serif",
-          }}
-        >
-          {busyAction === "download" ? "Saving..." : "Download"}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onAnalyze(recording)}
-          disabled={!canAnalyze}
-          className="px-3 py-2 rounded-2xl text-xs transition-opacity hover:opacity-80"
-          style={{
-            background: "rgba(245,158,11,0.16)",
-            border: "1px solid rgba(245,158,11,0.24)",
-            color: "#f7c56d",
-            cursor: canAnalyze ? "pointer" : "not-allowed",
-            fontFamily: "'DM Sans', sans-serif",
-          }}
-        >
-          {busyAction === "analyze"
-            ? "Running..."
-            : selectedClassesCount > 0
-              ? `Run AI (${selectedClassesCount})`
-              : "Run AI"}
-        </button>
-      </div>
-    </div>
+          Recording details
+        </summary>
+        <div className="grid grid-cols-1 gap-3 mt-3 text-xs">
+          <div style={{ color: "rgba(255,255,255,0.78)" }}>
+            <p style={{ color: "rgba(255,255,255,0.38)" }}>Storage bucket</p>
+            <p className="mt-1">{recording.storageBucket || "No bucket recorded"}</p>
+          </div>
+          <div
+            style={{ color: "rgba(255,255,255,0.52)", fontFamily: "monospace" }}
+            title={recording.pathPrefix || ""}
+          >
+            {truncateMiddle(recording.pathPrefix, 82)}
+          </div>
+          {(recording.trackRecordingTemplate || recording.compositeRecordingTemplate) && (
+            <div className="grid grid-cols-1 gap-2">
+              {recording.trackRecordingTemplate && (
+                <p
+                  style={{ color: "rgba(255,255,255,0.46)", fontFamily: "monospace" }}
+                  title={recording.trackRecordingTemplate}
+                >
+                  Track: {truncateMiddle(recording.trackRecordingTemplate, 82)}
+                </p>
+              )}
+              {recording.compositeRecordingTemplate && (
+                <p
+                  style={{ color: "rgba(255,255,255,0.46)", fontFamily: "monospace" }}
+                  title={recording.compositeRecordingTemplate}
+                >
+                  Composite: {truncateMiddle(recording.compositeRecordingTemplate, 82)}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </details>
+    </article>
   );
 }
 
@@ -1164,16 +1126,20 @@ function AnalysisJobCard({
 
   return (
     <div
-      className="rounded-3xl p-4 flex flex-col gap-3"
+      className="rounded-[22px] p-4 flex flex-col gap-3"
       style={{
-        background: "rgba(255,255,255,0.04)",
+        background: "rgba(255,255,255,0.03)",
         border: "1px solid rgba(255,255,255,0.08)",
       }}
     >
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-white font-medium text-sm">{job.jobId}</p>
-          <p className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>
+          <p
+            className="text-xs mt-1 truncate"
+            style={{ color: "rgba(255,255,255,0.42)" }}
+            title={job.sourceName || `recording-${job.recordingDetailId}`}
+          >
             {job.sourceName || `recording-${job.recordingDetailId}`}
           </p>
         </div>
@@ -1212,8 +1178,8 @@ function AnalysisJobCard({
             key={label}
             className="px-2.5 py-1 rounded-full text-[11px]"
             style={{
-              background: "rgba(79,179,255,0.14)",
-              border: "1px solid rgba(79,179,255,0.22)",
+              background: "rgba(79,179,255,0.1)",
+              border: "1px solid rgba(79,179,255,0.18)",
               color: "#90caff",
             }}
           >
@@ -1222,31 +1188,9 @@ function AnalysisJobCard({
         ))}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-        <div
-          className="rounded-2xl p-3"
-          style={{
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(255,255,255,0.06)",
-            color: "rgba(255,255,255,0.72)",
-          }}
-        >
-          <p style={{ color: "rgba(255,255,255,0.35)" }}>Created</p>
-          <p className="mt-1">{formatDate(job.createdAt)}</p>
-        </div>
-        <div
-          className="rounded-2xl p-3"
-          style={{
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(255,255,255,0.06)",
-            color: "rgba(255,255,255,0.72)",
-          }}
-        >
-          <p style={{ color: "rgba(255,255,255,0.35)" }}>Completed</p>
-          <p className="mt-1">
-            {job.completedAt ? formatDate(job.completedAt) : "Still running"}
-          </p>
-        </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs" style={{ color: "rgba(255,255,255,0.58)" }}>
+        <span>Created {formatDate(job.createdAt)}</span>
+        <span>{job.completedAt ? `Completed ${formatDate(job.completedAt)}` : "Still running"}</span>
       </div>
 
       {job.selectedObjectKey && (
@@ -1256,65 +1200,82 @@ function AnalysisJobCard({
       )}
 
       {subJobs.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          {subJobs.map((subJob) => {
-            const subTone = getStatusTone(subJob.state);
-            const moments = getClassDetectionMoments(job, subJob.label);
-            const canPreviewClass = previewEnabled && (moments.length > 0 || subJob.jobId != null);
-            return (
-              <div
-                key={`${job.jobId}-${subJob.label}`}
-                className="rounded-2xl px-3 py-2"
-                style={{
-                  background: "rgba(255,255,255,0.03)",
-                  border: "1px solid rgba(255,255,255,0.06)",
-                }}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs text-white">{formatClassLabel(subJob.label)}</span>
-                  <span
-                    className="px-2 py-0.5 rounded-full text-[10px]"
-                    style={{
-                      background: subTone.background,
-                      border: `1px solid ${subTone.border}`,
-                      color: subTone.color,
-                    }}
-                  >
-                    {formatStatusLabel(subJob.state)}
-                  </span>
+        <details
+          className="rounded-2xl px-3 py-2"
+          style={{
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.06)",
+          }}
+        >
+          <summary
+            className="text-xs cursor-pointer"
+            style={{ color: "rgba(255,255,255,0.76)" }}
+          >
+            Class runs ({subJobs.length})
+          </summary>
+          <div className="grid grid-cols-1 gap-2 mt-3">
+            {subJobs.map((subJob) => {
+              const subTone = getStatusTone(subJob.state);
+              const moments = getClassDetectionMoments(job, subJob.label);
+              const canPreviewClass = previewEnabled && (moments.length > 0 || subJob.jobId != null);
+              return (
+                <div
+                  key={`${job.jobId}-${subJob.label}`}
+                  className="rounded-2xl px-3 py-2"
+                  style={{
+                    background: "rgba(255,255,255,0.02)",
+                    border: "1px solid rgba(255,255,255,0.05)",
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs text-white">{formatClassLabel(subJob.label)}</p>
+                      {subJob.jobId && (
+                        <p
+                          className="text-[11px] mt-1 truncate"
+                          style={{ color: "rgba(255,255,255,0.4)", fontFamily: "monospace" }}
+                          title={subJob.jobId}
+                        >
+                          {subJob.jobId}
+                        </p>
+                      )}
+                    </div>
+                    <span
+                      className="px-2 py-0.5 rounded-full text-[10px]"
+                      style={{
+                        background: subTone.background,
+                        border: `1px solid ${subTone.border}`,
+                        color: subTone.color,
+                      }}
+                    >
+                      {formatStatusLabel(subJob.state)}
+                    </span>
+                  </div>
+                  {subJob.lastError && (
+                    <p className="text-[11px] mt-2" style={{ color: "rgba(255,170,170,0.92)" }}>
+                      {subJob.lastError}
+                    </p>
+                  )}
+                  {canPreviewClass && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenClassPreview(job, subJob.label, subJob.jobId)}
+                      className="mt-3 px-3 py-1.5 rounded-2xl text-[11px] transition-opacity hover:opacity-80"
+                      style={{
+                        background: "rgba(255,255,255,0.06)",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        color: "rgba(255,255,255,0.82)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Open preview
+                    </button>
+                  )}
                 </div>
-                {subJob.jobId && (
-                  <p
-                    className="text-[11px] mt-2"
-                    style={{ color: "rgba(255,255,255,0.4)", fontFamily: "monospace" }}
-                  >
-                    {subJob.jobId}
-                  </p>
-                )}
-                {subJob.lastError && (
-                  <p className="text-[11px] mt-2" style={{ color: "rgba(255,170,170,0.92)" }}>
-                    {subJob.lastError}
-                  </p>
-                )}
-                {canPreviewClass && (
-                  <button
-                    type="button"
-                    onClick={() => onOpenClassPreview(job, subJob.label, subJob.jobId)}
-                    className="mt-3 px-3 py-2 rounded-2xl text-[11px] transition-opacity hover:opacity-80"
-                    style={{
-                      background: "rgba(30,107,255,0.18)",
-                      border: "1px solid rgba(79,179,255,0.26)",
-                      color: "#90caff",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Preview {formatClassLabel(subJob.label)}
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        </details>
       )}
 
       {aggregateSummary && (
@@ -1384,16 +1345,20 @@ function DetectorJobCard({ job }: { job: DetectorJobStatus }) {
 
   return (
     <div
-      className="rounded-3xl p-4 flex flex-col gap-3"
+      className="rounded-[22px] p-4 flex flex-col gap-3"
       style={{
-        background: "rgba(255,255,255,0.04)",
+        background: "rgba(255,255,255,0.03)",
         border: "1px solid rgba(255,255,255,0.08)",
       }}
     >
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-white font-medium text-sm">{job.jobId}</p>
-          <p className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.4)" }}>
+          <p
+            className="text-xs mt-1 truncate"
+            style={{ color: "rgba(255,255,255,0.42)" }}
+            title={job.sourceName || "Live detector job"}
+          >
             {job.sourceName || "Live detector job"}
           </p>
         </div>
@@ -1409,29 +1374,27 @@ function DetectorJobCard({ job }: { job: DetectorJobStatus }) {
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 text-xs">
-        <div
-          className="rounded-2xl p-3"
+      <div className="flex flex-wrap gap-2 text-xs">
+        <span
+          className="px-2.5 py-1 rounded-full"
           style={{
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(255,255,255,0.06)",
-            color: "rgba(255,255,255,0.72)",
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            color: "rgba(255,255,255,0.7)",
           }}
         >
-          <p style={{ color: "rgba(255,255,255,0.35)" }}>Frames</p>
-          <p className="mt-1">{job.framesProcessed ?? 0}</p>
-        </div>
-        <div
-          className="rounded-2xl p-3"
+          Frames {job.framesProcessed ?? 0}
+        </span>
+        <span
+          className="px-2.5 py-1 rounded-full"
           style={{
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(255,255,255,0.06)",
-            color: "rgba(255,255,255,0.72)",
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            color: "rgba(255,255,255,0.7)",
           }}
         >
-          <p style={{ color: "rgba(255,255,255,0.35)" }}>Events</p>
-          <p className="mt-1">{job.eventsWritten ?? 0}</p>
-        </div>
+          Events {job.eventsWritten ?? 0}
+        </span>
       </div>
 
       {(job.startedAt || job.lastFrameAt) && (
@@ -2016,18 +1979,14 @@ export default function RecordingPage() {
     }
   }
 
+  const recordingAnalysisJobs = jobsStatus?.recordingAnalysisJobs ?? [];
+  const detectorJobs = jobsStatus?.detectorJobs ?? [];
+  const totalJobCount = recordingAnalysisJobs.length + detectorJobs.length;
+
   return (
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap');
-
-        @font-face {
-          font-family: 'Ethnocentric';
-          src: url('https://db.onlinewebfonts.com/t/4f212c96840b7c759cb0e61720d2c2c5.woff2') format('woff2'),
-               url('https://db.onlinewebfonts.com/t/4f212c96840b7c759cb0e61720d2c2c5.woff') format('woff');
-          font-weight: normal;
-          font-style: normal;
-        }
 
         .rec-root * { box-sizing: border-box; }
 
@@ -2089,7 +2048,7 @@ export default function RecordingPage() {
               <div>
                 <h1 className="text-2xl font-semibold text-white">Recordings</h1>
                 <p className="text-sm mt-2" style={{ color: "rgba(255,255,255,0.38)" }}>
-                  Database-backed recording metadata with on-demand secure download and AI analysis.
+                  Search recordings, preview them, and launch AI review from one place.
                 </p>
                 <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.3)" }}>
                   Showing {recordings.length} of {total} entries in{" "}
@@ -2097,21 +2056,21 @@ export default function RecordingPage() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="flex flex-wrap gap-2">
                 {ROOT_OPTIONS.map((option) => (
                   <button
                     key={option.value}
                     type="button"
                     onClick={() => setRecordingRoot(option.value)}
-                    className="text-left rounded-3xl px-4 py-3 transition-all duration-150"
+                    className="text-left rounded-full px-4 py-2.5 transition-all duration-150"
                     style={{
                       background:
                         recordingRoot === option.value
-                          ? "linear-gradient(to bottom, rgba(30,107,255,0.22), rgba(79,179,255,0.1))"
+                          ? "rgba(79,179,255,0.14)"
                           : "rgba(255,255,255,0.04)",
                       border: `1px solid ${
                         recordingRoot === option.value
-                          ? "rgba(79,179,255,0.32)"
+                          ? "rgba(79,179,255,0.28)"
                           : "rgba(255,255,255,0.08)"
                       }`,
                       color:
@@ -2122,9 +2081,6 @@ export default function RecordingPage() {
                     }}
                   >
                     <p className="font-medium text-sm">{option.label}</p>
-                    <p className="text-xs mt-1" style={{ color: "rgba(255,255,255,0.42)" }}>
-                      {option.hint}
-                    </p>
                   </button>
                 ))}
               </div>
@@ -2132,7 +2088,7 @@ export default function RecordingPage() {
 
             <form
               onSubmit={handleApplyFilters}
-              className="rounded-[28px] p-4"
+              className="rounded-[24px] p-4"
               style={{
                 background: "rgba(255,255,255,0.04)",
                 border: "1px solid rgba(255,255,255,0.08)",
@@ -2187,10 +2143,9 @@ export default function RecordingPage() {
                     type="submit"
                     className="px-4 py-3 rounded-2xl text-sm"
                     style={{
-                      background: "linear-gradient(to bottom, #ffffff 0%, #dce8ff 100%)",
-                      color: "#0a20bb",
-                      fontFamily: "'Ethnocentric', sans-serif",
-                      letterSpacing: "0.04em",
+                      background: "#edf4ff",
+                      color: "#1638b7",
+                      fontWeight: 600,
                       cursor: "pointer",
                     }}
                   >
@@ -2213,9 +2168,9 @@ export default function RecordingPage() {
               </div>
             </form>
 
-            <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-4">
+            <div className="grid grid-cols-1 xl:grid-cols-[1.02fr_0.98fr] gap-4 items-start">
               <section
-                className="rounded-[28px] p-5"
+                className="rounded-[24px] p-5"
                 style={{
                   background: "rgba(255,255,255,0.04)",
                   border: "1px solid rgba(255,255,255,0.08)",
@@ -2223,9 +2178,9 @@ export default function RecordingPage() {
               >
                 <div className="flex items-start justify-between gap-3 mb-4">
                   <div>
-                    <h2 className="text-white font-medium">AI Detection Classes</h2>
+                    <h2 className="text-white font-medium">AI Detection</h2>
                     <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.38)" }}>
-                      Choose the classes that each recording analysis job should run as separate subjobs.
+                      Pick the classes to run when you start analysis on a recording.
                     </p>
                   </div>
                   <button
@@ -2237,7 +2192,7 @@ export default function RecordingPage() {
                       setSelectedClasses(defaults.length > 0 ? [...defaults] : [...supportedClasses]);
                     }}
                     disabled={classesLoading || supportedClasses.length === 0}
-                    className="px-3 py-2 rounded-2xl text-xs"
+                    className="px-3 py-2 rounded-full text-xs"
                     style={{
                       background: "rgba(255,255,255,0.06)",
                       border: "1px solid rgba(255,255,255,0.1)",
@@ -2268,16 +2223,15 @@ export default function RecordingPage() {
                           className="px-3 py-2 rounded-full text-xs"
                           style={{
                             background: selected
-                              ? "rgba(79,179,255,0.18)"
+                              ? "rgba(79,179,255,0.14)"
                               : "rgba(255,255,255,0.05)",
                             border: `1px solid ${
-                              selected ? "rgba(79,179,255,0.34)" : "rgba(255,255,255,0.1)"
+                              selected ? "rgba(79,179,255,0.24)" : "rgba(255,255,255,0.1)"
                             }`,
                             color: selected ? "#90caff" : "rgba(255,255,255,0.7)",
                             cursor: "pointer",
                           }}
                         >
-                          {selected ? "Selected: " : ""}
                           {formatClassLabel(label)}
                         </button>
                       );
@@ -2290,171 +2244,186 @@ export default function RecordingPage() {
                   </p>
                 )}
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                  <div
-                    className="rounded-2xl p-3"
-                    style={{
-                      background: "rgba(255,255,255,0.03)",
-                      border: "1px solid rgba(255,255,255,0.06)",
-                    }}
-                  >
-                    <p className="text-[11px]" style={{ color: "rgba(255,255,255,0.32)" }}>
-                      MODEL PATH
-                    </p>
-                    <p
-                      className="mt-2 text-xs"
-                      style={{ color: "rgba(255,255,255,0.76)", fontFamily: "monospace" }}
-                    >
-                      {modelPath || "Unknown"}
-                    </p>
-                  </div>
-                  <div
-                    className="rounded-2xl p-3"
-                    style={{
-                      background: "rgba(255,255,255,0.03)",
-                      border: "1px solid rgba(255,255,255,0.06)",
-                    }}
-                  >
-                    <p className="text-[11px]" style={{ color: "rgba(255,255,255,0.32)" }}>
-                      MODEL CLASSES
-                    </p>
-                    <p className="mt-2 text-sm" style={{ color: "rgba(255,255,255,0.76)" }}>
-                      {modelClasses.length} available in the loaded model
-                    </p>
-                    <p className="mt-1 text-xs" style={{ color: "rgba(255,255,255,0.42)" }}>
-                      {selectedClasses.length} class{selectedClasses.length === 1 ? "" : "es"} selected for analysis
-                    </p>
-                  </div>
+                <div className="flex flex-wrap gap-3 text-xs" style={{ color: "rgba(255,255,255,0.56)" }}>
+                  <span>
+                    {selectedClasses.length} class{selectedClasses.length === 1 ? "" : "es"} selected
+                  </span>
+                  <span>{modelClasses.length} classes in model</span>
                 </div>
+
+                <details
+                  className="rounded-2xl px-3 py-2 mt-4"
+                  style={{
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.06)",
+                  }}
+                >
+                  <summary
+                    className="text-xs cursor-pointer"
+                    style={{ color: "rgba(255,255,255,0.76)" }}
+                  >
+                    Model info
+                  </summary>
+                  <div className="grid grid-cols-1 gap-2 mt-3 text-xs">
+                    <p style={{ color: "rgba(255,255,255,0.76)", fontFamily: "monospace" }}>
+                      {modelPath || "Unknown model path"}
+                    </p>
+                  </div>
+                </details>
               </section>
 
               <section
-                className="rounded-[28px] p-5"
+                className="rounded-[24px] p-5"
                 style={{
                   background: "rgba(255,255,255,0.04)",
                   border: "1px solid rgba(255,255,255,0.08)",
                 }}
               >
-                <div className="flex items-start justify-between gap-3 mb-4">
-                  <div>
-                    <h2 className="text-white font-medium">Jobs Monitor</h2>
-                    <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.38)" }}>
-                      Tracks live detector jobs and aggregate recording-analysis jobs from the backend.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setJobsRefreshKey((value) => value + 1)}
-                      className="px-3 py-2 rounded-2xl text-xs"
-                      style={{
-                        background: "rgba(255,255,255,0.06)",
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        color: "rgba(255,255,255,0.76)",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Refresh jobs
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between gap-3 mb-4">
-                  <label
-                    className="flex items-center gap-2 text-sm"
-                    style={{ color: "rgba(255,255,255,0.7)" }}
+                <details>
+                  <summary
+                    className="flex items-center justify-between gap-3 cursor-pointer"
+                    style={{ listStyle: "none" }}
                   >
-                    <input
-                      type="checkbox"
-                      checked={includeCompletedJobs}
-                      onChange={(event) => setIncludeCompletedJobs(event.target.checked)}
-                    />
-                    Include completed jobs
-                  </label>
-
-                  <div className="flex items-center gap-2 text-xs">
-                    <span
-                      className="px-2.5 py-1 rounded-full"
-                      style={{
-                        background: "rgba(255,255,255,0.06)",
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        color: "rgba(255,255,255,0.78)",
-                      }}
-                    >
-                      Detector: {jobsStatus?.counts.detectorJobs ?? 0}
-                    </span>
-                    <span
-                      className="px-2.5 py-1 rounded-full"
-                      style={{
-                        background: "rgba(255,255,255,0.06)",
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        color: "rgba(255,255,255,0.78)",
-                      }}
-                    >
-                      Aggregate: {jobsStatus?.counts.recordingAnalysisJobs ?? 0}
-                    </span>
-                  </div>
-                </div>
-
-                {jobsLoading && !jobsStatus && (
-                  <p className="text-sm" style={{ color: "rgba(255,255,255,0.38)" }}>
-                    Loading jobs...
-                  </p>
-                )}
-
-                {jobsError && (
-                  <p className="text-sm mb-4" style={{ color: "rgba(255,170,170,0.92)" }}>
-                    {jobsError}
-                  </p>
-                )}
-
-                <div className="grid grid-cols-1 gap-4">
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm text-white">Recording analysis jobs</h3>
-                      <span className="text-xs" style={{ color: "rgba(255,255,255,0.36)" }}>
-                        Parent jobs saved by job id
-                      </span>
+                    <div>
+                      <h2 className="text-white font-medium">Jobs</h2>
+                      <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.38)" }}>
+                        Track running and completed detector work without leaving the page.
+                      </p>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-3">
-                      {(jobsStatus?.recordingAnalysisJobs ?? []).length === 0 && (
-                        <p className="text-sm" style={{ color: "rgba(255,255,255,0.34)" }}>
-                          No matching analysis jobs right now.
-                        </p>
-                      )}
-                      {(jobsStatus?.recordingAnalysisJobs ?? []).map((job) => (
-                        <AnalysisJobCard
-                          key={job.jobId}
-                          job={job}
-                          loading={jobRefreshLoadingById[job.jobId] === true}
-                          onRefresh={refreshAnalysisJob}
-                          onOpenClassPreview={openClassPreview}
+                    <div className="flex items-center gap-2 text-xs">
+                      <span
+                        className="px-2.5 py-1 rounded-full"
+                        style={{
+                          background: "rgba(255,255,255,0.06)",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          color: "rgba(255,255,255,0.78)",
+                        }}
+                      >
+                        {recordingAnalysisJobs.length} analysis
+                      </span>
+                      <span
+                        className="px-2.5 py-1 rounded-full"
+                        style={{
+                          background: "rgba(255,255,255,0.06)",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          color: "rgba(255,255,255,0.78)",
+                        }}
+                      >
+                        {detectorJobs.length} detector
+                      </span>
+                      <span
+                        className="px-2.5 py-1 rounded-full"
+                        style={{
+                          background: "rgba(255,255,255,0.06)",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          color: "rgba(255,255,255,0.78)",
+                        }}
+                      >
+                        {totalJobCount} total
+                      </span>
+                    </div>
+                  </summary>
+
+                  <div className="mt-5">
+                    <div className="flex items-center justify-between gap-3 mb-4">
+                      <label
+                        className="flex items-center gap-2 text-sm"
+                        style={{ color: "rgba(255,255,255,0.7)" }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={includeCompletedJobs}
+                          onChange={(event) => setIncludeCompletedJobs(event.target.checked)}
                         />
-                      ))}
+                        Include completed jobs
+                      </label>
+
+                      <button
+                        type="button"
+                        onClick={() => setJobsRefreshKey((value) => value + 1)}
+                        className="px-3 py-2 rounded-full text-xs"
+                        style={{
+                          background: "rgba(255,255,255,0.06)",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          color: "rgba(255,255,255,0.76)",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Refresh jobs
+                      </button>
+                    </div>
+
+                    {jobsLoading && !jobsStatus && (
+                      <p className="text-sm" style={{ color: "rgba(255,255,255,0.38)" }}>
+                        Loading jobs...
+                      </p>
+                    )}
+
+                    {jobsError && (
+                      <p className="text-sm mb-4" style={{ color: "rgba(255,170,170,0.92)" }}>
+                        {jobsError}
+                      </p>
+                    )}
+
+                    <div className="grid grid-cols-1 gap-4">
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-sm text-white">Recording analysis jobs</h3>
+                          <span className="text-xs" style={{ color: "rgba(255,255,255,0.36)" }}>
+                            Parent jobs saved by job id
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3">
+                          {recordingAnalysisJobs.length === 0 && (
+                            <p className="text-sm" style={{ color: "rgba(255,255,255,0.34)" }}>
+                              No matching analysis jobs right now.
+                            </p>
+                          )}
+                          {recordingAnalysisJobs.map((job) => (
+                            <AnalysisJobCard
+                              key={job.jobId}
+                              job={job}
+                              loading={jobRefreshLoadingById[job.jobId] === true}
+                              onRefresh={refreshAnalysisJob}
+                              onOpenClassPreview={openClassPreview}
+                            />
+                          ))}
+                        </div>
+                      </div>
+
+                      <details
+                        className="rounded-2xl px-3 py-2"
+                        style={{
+                          background: "rgba(255,255,255,0.03)",
+                          border: "1px solid rgba(255,255,255,0.06)",
+                        }}
+                      >
+                        <summary
+                          className="flex items-center justify-between gap-3 cursor-pointer text-sm"
+                          style={{ color: "rgba(255,255,255,0.78)" }}
+                        >
+                          <span>Detector jobs</span>
+                          <span style={{ color: "rgba(255,255,255,0.42)" }}>
+                            {detectorJobs.length} live worker{detectorJobs.length === 1 ? "" : "s"}
+                          </span>
+                        </summary>
+
+                        <div className="grid grid-cols-1 gap-3 mt-3">
+                          {detectorJobs.length === 0 && (
+                            <p className="text-sm" style={{ color: "rgba(255,255,255,0.34)" }}>
+                              No matching detector jobs right now.
+                            </p>
+                          )}
+                          {detectorJobs.map((job) => (
+                            <DetectorJobCard key={job.jobId} job={job} />
+                          ))}
+                        </div>
+                      </details>
                     </div>
                   </div>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm text-white">Detector jobs</h3>
-                      <span className="text-xs" style={{ color: "rgba(255,255,255,0.36)" }}>
-                        Live model workers
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-3">
-                      {(jobsStatus?.detectorJobs ?? []).length === 0 && (
-                        <p className="text-sm" style={{ color: "rgba(255,255,255,0.34)" }}>
-                          No matching detector jobs right now.
-                        </p>
-                      )}
-                      {(jobsStatus?.detectorJobs ?? []).map((job) => (
-                        <DetectorJobCard key={job.jobId} job={job} />
-                      ))}
-                    </div>
-                  </div>
-                </div>
+                </details>
               </section>
             </div>
 
