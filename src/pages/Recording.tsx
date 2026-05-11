@@ -2016,7 +2016,7 @@ export default function RecordingPage() {
             <button
               type="button"
               onClick={() => setRefreshKey((value) => value + 1)}
-              className="px-3 py-2 rounded-xl text-xs transition-opacity hover:opacity-80"
+              className="px-3 py-2 rounded-xl text-xs transition-all duration-150 hover:-translate-y-0.5 hover:opacity-95"
               style={{
                 background: "rgba(255,255,255,0.06)",
                 border: "1px solid rgba(255,255,255,0.1)",
@@ -2028,8 +2028,8 @@ export default function RecordingPage() {
             </button>
             <button
               type="button"
-              onClick={() => navigate(-1)}
-              className="px-3 py-2 rounded-xl text-xs transition-opacity hover:opacity-80"
+              onClick={() => navigate("/dashboard")}
+              className="px-3 py-2 rounded-xl text-xs transition-all duration-150 hover:-translate-y-0.5 hover:opacity-95 flex items-center gap-1.5"
               style={{
                 background: "rgba(255,255,255,0.06)",
                 border: "1px solid rgba(255,255,255,0.1)",
@@ -2037,6 +2037,19 @@ export default function RecordingPage() {
                 cursor: "pointer",
               }}
             >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="19" y1="12" x2="5" y2="12" />
+                <polyline points="12 19 5 12 12 5" />
+              </svg>
               Back
             </button>
           </div>

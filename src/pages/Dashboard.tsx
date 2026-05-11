@@ -1,186 +1,265 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
-
-/** Animated mesh gradient — identical background to the login/org pages */
-function MeshGradient() {
-  return (
-    <div
-      aria-hidden
-      className="absolute inset-0 overflow-hidden pointer-events-none"
-    >
-      <div
-        className="absolute inset-0"
-        style={{
-          background:
-            "linear-gradient(to bottom, #ffffff 0%, #daeeff 28%, #9ecfff 42%, #3d8fff 58%, #1155ee 75%, #0930cc 100%)",
-        }}
-      />
-      <div
-        className="absolute"
-        style={{
-          top: "38%", left: "-10%", width: "80%", height: "55%",
-          borderRadius: "50%",
-          background: "radial-gradient(ellipse, rgba(100,200,255,0.75) 0%, transparent 65%)",
-          filter: "blur(32px)",
-          animation: "driftA 9s ease-in-out infinite",
-        }}
-      />
-      <div
-        className="absolute"
-        style={{
-          top: "45%", right: "-15%", width: "75%", height: "50%",
-          borderRadius: "50%",
-          background: "radial-gradient(ellipse, rgba(60,120,255,0.65) 0%, transparent 65%)",
-          filter: "blur(28px)",
-          animation: "driftB 11s ease-in-out infinite",
-        }}
-      />
-      <div
-        className="absolute"
-        style={{
-          top: "55%", left: "20%", width: "60%", height: "40%",
-          borderRadius: "50%",
-          background: "radial-gradient(ellipse, rgba(130,210,255,0.5) 0%, transparent 60%)",
-          filter: "blur(22px)",
-          animation: "driftC 13s ease-in-out infinite",
-        }}
-      />
-    </div>
-  );
-}
+import {
+  RecordingThemeBackdrop,
+  recordingThemeDangerPillButtonStyle,
+  recordingThemeMutedTextStyle,
+  recordingThemePageStyle,
+  recordingThemePillButtonStyle,
+  recordingThemeSecondaryActiveButtonStyle,
+  recordingThemeSurfaceStrongStyle,
+} from "../components/ui/recordingTheme";
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { setCurrentPage, selectedOrg, identifier } = useAppContext();
+  const { setCurrentPage, selectedOrg, identifier, logout } = useAppContext();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setCurrentPage("dashboard");
-    const t = setTimeout(() => setMounted(true), 60);
-    return () => clearTimeout(t);
+    const timer = window.setTimeout(() => setMounted(true), 60);
+    return () => window.clearTimeout(timer);
   }, [setCurrentPage]);
 
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&display=swap');
-
-        @font-face {
-          font-family: 'Ethnocentric';
-          src: url('https://db.onlinewebfonts.com/t/4f212c96840b7c759cb0e61720d2c2c5.woff2') format('woff2'),
-               url('https://db.onlinewebfonts.com/t/4f212c96840b7c759cb0e61720d2c2c5.woff') format('woff');
-          font-weight: normal;
-          font-style: normal;
-          font-display: swap;
-        }
-
-        @keyframes driftA {
-          0%, 100% { transform: translate(0%,  0%) scale(1);    }
-          33%       { transform: translate(6%,  -4%) scale(1.05); }
-          66%       { transform: translate(-4%, 6%)  scale(0.97); }
-        }
-        @keyframes driftB {
-          0%, 100% { transform: translate(0%,  0%) scale(1);    }
-          40%       { transform: translate(-8%, 5%)  scale(1.08); }
-          75%       { transform: translate(5%,  -3%) scale(0.95); }
-        }
-        @keyframes driftC {
-          0%, 100% { transform: translate(0%, 0%)  scale(1);    }
-          50%       { transform: translate(4%, -6%) scale(1.06); }
-        }
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap');
 
         @keyframes fadeSlideUp {
           from { opacity: 0; transform: translateY(20px); }
-          to   { opacity: 1; transform: translateY(0);    }
+          to { opacity: 1; transform: translateY(0); }
         }
 
-        .anim-logo   { animation: fadeSlideUp 0.5s  cubic-bezier(0.22,1,0.36,1) both; animation-delay: 0.05s; }
-        .anim-title  { animation: fadeSlideUp 0.5s  cubic-bezier(0.22,1,0.36,1) both; animation-delay: 0.15s; }
-        .anim-btn-1  { animation: fadeSlideUp 0.55s cubic-bezier(0.22,1,0.36,1) both; animation-delay: 0.25s; }
-        .anim-btn-2  { animation: fadeSlideUp 0.55s cubic-bezier(0.22,1,0.36,1) both; animation-delay: 0.35s; }
-
-        .dashboard-btn {
-          transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
-          transform: translateY(0px);
-          background: linear-gradient(to bottom, rgba(255,255,255,0.18) 0%, rgba(140,190,255,0.10) 100%);
-          border: 1px solid rgba(255,255,255,0.22);
-          backdrop-filter: blur(14px);
-          -webkit-backdrop-filter: blur(14px);
-          color: rgba(255,255,255,0.9);
-        }
-        
-        .dashboard-btn:hover {
-          transform: translateY(-3px);
-          border-color: rgba(255,255,255,0.5);
-          background: linear-gradient(to bottom, rgba(255,255,255,0.26) 0%, rgba(180,210,255,0.18) 100%);
-          box-shadow:
-            0 8px 0 rgba(180,200,255,0.25),
-            0 12px 24px rgba(0,30,160,0.35),
-            0 24px 48px rgba(100,160,255,0.2);
+        .anim-header {
+          animation: fadeSlideUp 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+          animation-delay: 0.05s;
         }
 
-        .dashboard-btn:active {
+        .anim-hero {
+          animation: fadeSlideUp 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+          animation-delay: 0.12s;
+        }
+
+        .anim-card-1 {
+          animation: fadeSlideUp 0.58s cubic-bezier(0.22, 1, 0.36, 1) both;
+          animation-delay: 0.18s;
+        }
+
+        .anim-card-2 {
+          animation: fadeSlideUp 0.58s cubic-bezier(0.22, 1, 0.36, 1) both;
+          animation-delay: 0.24s;
+        }
+
+        .top-pill,
+        .dashboard-card {
+          transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+        }
+
+        .top-pill:hover,
+        .dashboard-card:hover {
+          transform: translateY(-4px);
+          box-shadow: 0 24px 50px rgba(2, 8, 22, 0.34);
+        }
+
+        .top-pill:active,
+        .dashboard-card:active {
           transform: translateY(1px);
-          box-shadow:
-            0 2px 0 rgba(180,200,255,0.2),
-            0 4px 12px rgba(0,30,160,0.3);
+        }
+
+        .dashboard-card:hover {
+          border-color: rgba(79, 179, 255, 0.2) !important;
+        }
+
+        .dashboard-card:hover .dashboard-sheen {
+          opacity: 1;
+          transform: translateX(0);
+        }
+
+        .dashboard-card:hover .dashboard-icon {
+          transform: scale(1.08) translateY(-2px);
+          background: rgba(79, 179, 255, 0.18) !important;
+        }
+
+        .dashboard-card:hover .dashboard-arrow {
+          transform: translateX(4px);
+          color: #d8efff;
+        }
+
+        .dashboard-card:hover .dashboard-kicker {
+          color: #d8efff;
+        }
+
+        .dashboard-icon,
+        .dashboard-arrow,
+        .dashboard-kicker,
+        .dashboard-sheen {
+          transition: transform 0.18s ease, opacity 0.18s ease, color 0.18s ease, background 0.18s ease;
         }
       `}</style>
 
-      <div
-        className="relative min-h-screen w-full overflow-hidden flex flex-col"
-        style={{ fontFamily: "'DM Sans', sans-serif" }}
-      >
-        <MeshGradient />
+      <div className="relative min-h-screen w-full overflow-hidden" style={recordingThemePageStyle}>
+        <RecordingThemeBackdrop />
 
-        <div className="relative z-10 flex flex-col flex-1 w-full items-center justify-center px-6 py-12">
-          <div className="w-full flex flex-col items-center gap-10" style={{ maxWidth: 420 }}>
-            <div className={mounted ? "anim-logo" : "opacity-0"}>
-              <img src="/SixDX Logo.svg" alt="SixDX" style={{ height: 40 }} />
+        <div className="relative z-10 flex min-h-screen flex-col px-5 py-6 sm:px-6 sm:py-8">
+          <header className={`mx-auto flex w-full max-w-6xl items-center justify-between gap-4 ${mounted ? "anim-header" : "opacity-0"}`}>
+            <img src="/SixDX White.svg" alt="SixDX" style={{ height: 28 }} />
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => navigate("/organizations")}
+                className="top-pill rounded-xl px-4 py-2 text-sm"
+                style={{ ...recordingThemePillButtonStyle, cursor: "pointer" }}
+              >
+                Change organization
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate("/room")}
+                className="top-pill rounded-xl px-4 py-2 text-sm"
+                style={{ ...recordingThemeSecondaryActiveButtonStyle, cursor: "pointer" }}
+              >
+                Open rooms
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  logout();
+                  navigate("/");
+                }}
+                className="top-pill rounded-xl px-4 py-2 text-sm"
+                style={{ ...recordingThemeDangerPillButtonStyle, cursor: "pointer" }}
+              >
+                Sign out
+              </button>
             </div>
+          </header>
 
-            <div className="w-full flex flex-col gap-4">
-              <div className={`mb-4 text-center ${mounted ? "anim-title" : "opacity-0"}`}>
-                <h1 className="text-2xl font-medium text-white/90 mb-1" style={{ letterSpacing: "0.01em" }}>
-                  Welcome, {identifier || 'User'}
-                </h1>
-                <p className="text-sm text-white/70">
-                  {selectedOrg ? `Connected to ${selectedOrg.charAt(0).toUpperCase() + selectedOrg.slice(1)}` : 'Dashboard Hub'}
+          <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col justify-center py-10">
+            <section className={mounted ? "anim-hero" : "opacity-0"}>
+              <div
+                className="inline-flex items-center rounded-full px-3 py-1.5 text-xs font-medium"
+                style={{
+                  ...recordingThemePillButtonStyle,
+                  color: "#90caff",
+                }}
+              >
+                Workspace overview
+              </div>
+              <h1 className="mt-5 text-4xl font-semibold leading-tight text-white sm:text-5xl">
+                Welcome back, {identifier || "User"}.
+              </h1>
+              <p className="mt-4 max-w-2xl text-base leading-7" style={recordingThemeMutedTextStyle}>
+                Jump into a live room or head straight to recordings. Everything now follows the
+                same calmer workspace theme as the recordings area.
+              </p>
+              {selectedOrg && (
+                <div
+                  className="mt-5 inline-flex items-center rounded-full px-4 py-2 text-sm"
+                  style={recordingThemePillButtonStyle}
+                >
+                  Working in {selectedOrg.charAt(0).toUpperCase() + selectedOrg.slice(1)}
+                </div>
+              )}
+            </section>
+
+            <section className="mt-10 grid gap-4 md:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => navigate("/room")}
+                className={`dashboard-card relative overflow-hidden rounded-[28px] p-6 text-left ${mounted ? "anim-card-1" : "opacity-0"}`}
+                style={recordingThemeSurfaceStrongStyle}
+              >
+                <div
+                  aria-hidden
+                  className="dashboard-sheen absolute inset-0 opacity-0"
+                  style={{
+                    background:
+                      "linear-gradient(135deg, rgba(79,179,255,0.18) 0%, rgba(79,179,255,0.05) 38%, transparent 72%)",
+                    transform: "translateX(-12px)",
+                  }}
+                />
+                <div className="relative z-10">
+                <div
+                  className="dashboard-icon flex h-12 w-12 items-center justify-center rounded-2xl"
+                  style={recordingThemeSecondaryActiveButtonStyle}
+                >
+                  <svg
+                    width="22"
+                    height="22"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polygon points="23 7 16 12 23 17 23 7" />
+                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                  </svg>
+                </div>
+                <h2 className="mt-6 text-2xl font-semibold text-white">Meetings</h2>
+                <p className="mt-3 text-sm leading-6" style={recordingThemeMutedTextStyle}>
+                  Start a new room, join by code, and move straight into the live call flow.
                 </p>
-              </div>
+                <div className="mt-6 flex items-center justify-between gap-3">
+                  <div className="dashboard-kicker text-sm font-medium text-[#90caff]">
+                    Open room controls
+                  </div>
+                  <div className="dashboard-arrow text-sm font-medium text-[#90caff]">Explore</div>
+                </div>
+                </div>
+              </button>
 
-              <div className={mounted ? "anim-btn-1" : "opacity-0"}>
-                <button
-                  type="button"
-                  onClick={() => navigate("/room")}
-                  className="dashboard-btn w-full px-5 py-5 rounded-3xl flex flex-col items-center justify-center gap-2 outline-none"
+              <button
+                type="button"
+                onClick={() => navigate("/recordings")}
+                className={`dashboard-card relative overflow-hidden rounded-[28px] p-6 text-left ${mounted ? "anim-card-2" : "opacity-0"}`}
+                style={recordingThemeSurfaceStrongStyle}
+              >
+                <div
+                  aria-hidden
+                  className="dashboard-sheen absolute inset-0 opacity-0"
+                  style={{
+                    background:
+                      "linear-gradient(135deg, rgba(79,179,255,0.18) 0%, rgba(79,179,255,0.05) 38%, transparent 72%)",
+                    transform: "translateX(-12px)",
+                  }}
+                />
+                <div className="relative z-10">
+                <div
+                  className="dashboard-icon flex h-12 w-12 items-center justify-center rounded-2xl"
+                  style={recordingThemeSecondaryActiveButtonStyle}
                 >
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polygon points="23 7 16 12 23 17 23 7"></polygon>
-                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                  <svg
+                    width="22"
+                    height="22"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <circle cx="12" cy="12" r="3" fill="currentColor" />
                   </svg>
-                  <span className="font-medium text-lg tracking-wide">Meetings</span>
-                  <span className="text-xs text-white/60">Join or start a session</span>
-                </button>
-              </div>
-
-              <div className={mounted ? "anim-btn-2" : "opacity-0"}>
-                <button
-                  type="button"
-                  onClick={() => navigate("/recordings")}
-                  className="dashboard-btn w-full px-5 py-5 rounded-3xl flex flex-col items-center justify-center gap-2 outline-none"
-                >
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <circle cx="12" cy="12" r="3" fill="currentColor"></circle>
-                  </svg>
-                  <span className="font-medium text-lg tracking-wide">Recordings</span>
-                  <span className="text-xs text-white/60">View past sessions</span>
-                </button>
-              </div>
-            </div>
-          </div>
+                </div>
+                <h2 className="mt-6 text-2xl font-semibold text-white">Recordings</h2>
+                <p className="mt-3 text-sm leading-6" style={recordingThemeMutedTextStyle}>
+                  Search saved sessions, preview footage, launch AI analysis, and inspect results.
+                </p>
+                <div className="mt-6 flex items-center justify-between gap-3">
+                  <div className="dashboard-kicker text-sm font-medium text-[#90caff]">
+                    Browse recordings
+                  </div>
+                  <div className="dashboard-arrow text-sm font-medium text-[#90caff]">Explore</div>
+                </div>
+                </div>
+              </button>
+            </section>
+          </main>
         </div>
       </div>
     </>
