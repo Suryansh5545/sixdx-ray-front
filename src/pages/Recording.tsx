@@ -3,6 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { useAppContext } from "../context/AppContext";
 import { formatRoomCode } from "../lib/meeting/roomCode";
 import {
+  sendHseViolationEmail,
+  type HseViolationEmailResponse,
+} from "../lib/notifications";
+import {
   analyzeRecording,
   DEFAULT_RECORDING_ANALYSIS_CLASSES,
   downloadRecordingFile,
@@ -76,6 +80,11 @@ interface ClassPreviewState {
   loading: boolean;
   error: string | null;
   note: string | null;
+}
+
+interface ClassNotificationState {
+  response: HseViolationEmailResponse;
+  sentAt: string;
 }
 
 const ROOT_OPTIONS: Array<{ value: RecordingRoot; label: string; hint: string }> = [
@@ -334,6 +343,27 @@ function extractFolderNameFromSourceName(sourceName: string | null): string | nu
 
   const folderName = sourceName.slice(prefix.length).trim();
   return folderName.length > 0 ? folderName : null;
+}
+
+function extractRoomIdFromText(value: string | null | undefined): string | null {
+  if (!value) return null;
+
+  const match = value.toUpperCase().match(/[A-Z0-9]{3}-[A-Z0-9]{3}-[A-Z0-9]{3}/);
+  return match?.[0] ?? null;
+}
+
+function getClassNotificationKey(jobId: string, label: string): string {
+  return `${jobId}:${label}`;
+}
+
+function triggerSignedDownload(url: string) {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.target = "_blank";
+  anchor.rel = "noopener noreferrer";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -1110,11 +1140,21 @@ function AnalysisJobCard({
   loading,
   onRefresh,
   onOpenClassPreview,
+  onNotifyViolation,
+  notificationLoadingByKey,
+  notificationStateByKey,
+  onOpenSignedDownload,
+  onCopySignedDownload,
 }: {
   job: RecordingAnalysisJob;
   loading: boolean;
   onRefresh: (jobId: string) => void;
   onOpenClassPreview: (job: RecordingAnalysisJob, label: string, subJobId: string | null) => void;
+  onNotifyViolation: (job: RecordingAnalysisJob, label: string) => void;
+  notificationLoadingByKey: Record<string, boolean>;
+  notificationStateByKey: Record<string, ClassNotificationState>;
+  onOpenSignedDownload: (url: string) => void;
+  onCopySignedDownload: (url: string) => void;
 }) {
   const tone = getStatusTone(job.status);
   const subJobs = getSubJobSummaries(job);
@@ -1218,6 +1258,10 @@ function AnalysisJobCard({
               const subTone = getStatusTone(subJob.state);
               const moments = getClassDetectionMoments(job, subJob.label);
               const canPreviewClass = previewEnabled && (moments.length > 0 || subJob.jobId != null);
+              const canNotifyClass = previewEnabled && moments.length > 0;
+              const notificationKey = getClassNotificationKey(job.jobId, subJob.label);
+              const notificationState = notificationStateByKey[notificationKey] ?? null;
+              const notificationLoading = notificationLoadingByKey[notificationKey] === true;
               return (
                 <div
                   key={`${job.jobId}-${subJob.label}`}
@@ -1256,20 +1300,105 @@ function AnalysisJobCard({
                       {subJob.lastError}
                     </p>
                   )}
-                  {canPreviewClass && (
-                    <button
-                      type="button"
-                      onClick={() => onOpenClassPreview(job, subJob.label, subJob.jobId)}
-                      className="mt-3 px-3 py-1.5 rounded-2xl text-[11px] transition-opacity hover:opacity-80"
+                  {(canPreviewClass || canNotifyClass) && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {canPreviewClass && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenClassPreview(job, subJob.label, subJob.jobId)}
+                          className="px-3 py-1.5 rounded-2xl text-[11px] transition-opacity hover:opacity-80"
+                          style={{
+                            background: "rgba(255,255,255,0.06)",
+                            border: "1px solid rgba(255,255,255,0.1)",
+                            color: "rgba(255,255,255,0.82)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          Open preview
+                        </button>
+                      )}
+                      {canNotifyClass && (
+                        <button
+                          type="button"
+                          onClick={() => onNotifyViolation(job, subJob.label)}
+                          disabled={notificationLoading}
+                          className="px-3 py-1.5 rounded-2xl text-[11px] transition-opacity hover:opacity-80"
+                          style={{
+                            background: "rgba(79,179,255,0.1)",
+                            border: "1px solid rgba(79,179,255,0.18)",
+                            color: "#90caff",
+                            cursor: notificationLoading ? "not-allowed" : "pointer",
+                            opacity: notificationLoading ? 0.6 : 1,
+                          }}
+                        >
+                          {notificationLoading ? "Sending..." : "Notify HSE"}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {notificationState && (
+                    <div
+                      className="mt-3 rounded-2xl px-3 py-2 text-[11px] flex flex-col gap-2"
                       style={{
-                        background: "rgba(255,255,255,0.06)",
-                        border: "1px solid rgba(255,255,255,0.1)",
-                        color: "rgba(255,255,255,0.82)",
-                        cursor: "pointer",
+                        background: "rgba(34,197,94,0.08)",
+                        border: "1px solid rgba(34,197,94,0.16)",
+                        color: "rgba(170,245,195,0.92)",
                       }}
                     >
-                      Open preview
-                    </button>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span>
+                          Email {formatStatusLabel(notificationState.response.status)} to{" "}
+                          {notificationState.response.recipient || "configured recipient"}
+                        </span>
+                        <span style={{ color: "rgba(170,245,195,0.74)" }}>
+                          {formatDate(notificationState.sentAt)}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span>
+                          Attachment {notificationState.response.attachmentIncluded ? "included" : "not included"}
+                        </span>
+                        {notificationState.response.subject && (
+                          <span
+                            className="truncate"
+                            style={{ color: "rgba(170,245,195,0.78)" }}
+                            title={notificationState.response.subject}
+                          >
+                            {notificationState.response.subject}
+                          </span>
+                        )}
+                      </div>
+                      {notificationState.response.downloadUrl && (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => onOpenSignedDownload(notificationState.response.downloadUrl as string)}
+                            className="px-2.5 py-1 rounded-full text-[10px] transition-opacity hover:opacity-80"
+                            style={{
+                              background: "rgba(255,255,255,0.06)",
+                              border: "1px solid rgba(255,255,255,0.12)",
+                              color: "rgba(255,255,255,0.82)",
+                              cursor: "pointer",
+                            }}
+                          >
+                            Open signed link
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onCopySignedDownload(notificationState.response.downloadUrl as string)}
+                            className="px-2.5 py-1 rounded-full text-[10px] transition-opacity hover:opacity-80"
+                            style={{
+                              background: "rgba(255,255,255,0.06)",
+                              border: "1px solid rgba(255,255,255,0.12)",
+                              color: "rgba(255,255,255,0.82)",
+                              cursor: "pointer",
+                            }}
+                          >
+                            Copy link
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               );
@@ -1455,6 +1584,12 @@ export default function RecordingPage() {
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [jobsRefreshKey, setJobsRefreshKey] = useState(0);
   const [jobRefreshLoadingById, setJobRefreshLoadingById] = useState<Record<string, boolean>>({});
+  const [notificationLoadingByKey, setNotificationLoadingByKey] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [notificationStateByKey, setNotificationStateByKey] = useState<
+    Record<string, ClassNotificationState>
+  >({});
   const [preview, setPreview] = useState<PreviewState>({
     recording: null,
     url: null,
@@ -1827,6 +1962,94 @@ export default function RecordingPage() {
         const next = { ...current };
         delete next[jobId];
         return next;
+      });
+    }
+  }
+
+  async function handleNotifyViolation(job: RecordingAnalysisJob, label: string) {
+    const notificationKey = getClassNotificationKey(job.jobId, label);
+    const moments = getClassDetectionMoments(job, label);
+
+    if (moments.length === 0) {
+      setBanner({
+        kind: "error",
+        text: `No saved ${formatClassLabel(label)} violations were found to email.`,
+      });
+      return;
+    }
+
+    setNotificationLoadingByKey((current) => ({ ...current, [notificationKey]: true }));
+
+    try {
+      const matchedRecording = await resolveRecordingForJob(job).catch(() => null);
+      const fallbackFolderName =
+        matchedRecording?.folderName ?? extractFolderNameFromSourceName(job.sourceName) ?? undefined;
+      const selectedFilename = job.selectedObjectKey
+        ? fileNameFromKey(job.selectedObjectKey)
+        : undefined;
+      const inferredRoomId =
+        matchedRecording?.roomId ??
+        extractRoomIdFromText(selectedFilename) ??
+        extractRoomIdFromText(job.sourceName) ??
+        undefined;
+      const firstMoment = moments[0] ?? null;
+
+      const response = await sendHseViolationEmail({
+        violationLabel: label,
+        roomId: inferredRoomId,
+        folderName: fallbackFolderName,
+        filename: selectedFilename,
+        recordingDetailId: job.recordingDetailId,
+        analysisJobId: job.jobId,
+        detectedAt: firstMoment?.detectedAt ?? undefined,
+      });
+
+      setNotificationStateByKey((current) => ({
+        ...current,
+        [notificationKey]: {
+          response,
+          sentAt: new Date().toISOString(),
+        },
+      }));
+
+      setBanner({
+        kind: "success",
+        text: response.recipient
+          ? `HSE email queued for ${formatClassLabel(label)} to ${response.recipient}.`
+          : `HSE email queued for ${formatClassLabel(label)}.`,
+      });
+    } catch (notificationError) {
+      setBanner({
+        kind: "error",
+        text:
+          notificationError instanceof Error
+            ? notificationError.message
+            : "Failed to queue the HSE violation email.",
+      });
+    } finally {
+      setNotificationLoadingByKey((current) => {
+        const next = { ...current };
+        delete next[notificationKey];
+        return next;
+      });
+    }
+  }
+
+  function handleOpenSignedDownload(url: string) {
+    triggerSignedDownload(url);
+  }
+
+  async function handleCopySignedDownload(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setBanner({
+        kind: "success",
+        text: "Signed recording download link copied.",
+      });
+    } catch {
+      setBanner({
+        kind: "error",
+        text: "Could not copy the signed recording download link.",
       });
     }
   }
@@ -2401,6 +2624,11 @@ export default function RecordingPage() {
                               loading={jobRefreshLoadingById[job.jobId] === true}
                               onRefresh={refreshAnalysisJob}
                               onOpenClassPreview={openClassPreview}
+                              onNotifyViolation={handleNotifyViolation}
+                              notificationLoadingByKey={notificationLoadingByKey}
+                              notificationStateByKey={notificationStateByKey}
+                              onOpenSignedDownload={handleOpenSignedDownload}
+                              onCopySignedDownload={handleCopySignedDownload}
                             />
                           ))}
                         </div>
