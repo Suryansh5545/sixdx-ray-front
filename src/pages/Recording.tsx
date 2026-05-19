@@ -9,6 +9,7 @@ import {
 import {
   analyzeRecording,
   DEFAULT_RECORDING_ANALYSIS_CLASSES,
+  deleteRecording,
   downloadRecordingFile,
   fetchJobsStatus,
   fetchRecordingAnalysisJob,
@@ -22,7 +23,7 @@ import {
   type RecordingRoot,
 } from "../lib/recordings";
 
-type ActionKind = "preview" | "download" | "analyze";
+type ActionKind = "preview" | "download" | "analyze" | "delete";
 
 interface BannerState {
   kind: "success" | "error";
@@ -85,6 +86,11 @@ interface ClassPreviewState {
 interface ClassNotificationState {
   response: HseViolationEmailResponse;
   sentAt: string;
+}
+
+interface DeleteDialogState {
+  recording: RecordingListItem | null;
+  deleteStorageFiles: boolean;
 }
 
 const ROOT_OPTIONS: Array<{ value: RecordingRoot; label: string; hint: string }> = [
@@ -519,6 +525,154 @@ function PreviewModal({
   );
 }
 
+function DeleteRecordingModal({
+  state,
+  busy,
+  onClose,
+  onToggleDeleteStorageFiles,
+  onConfirm,
+}: {
+  state: DeleteDialogState;
+  busy: boolean;
+  onClose: () => void;
+  onToggleDeleteStorageFiles: (nextValue: boolean) => void;
+  onConfirm: () => void;
+}) {
+  const recording = state.recording;
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !busy) {
+        onClose();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [busy, onClose]);
+
+  if (!recording) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(2,5,14,0.92)", backdropFilter: "blur(14px)" }}
+      onClick={(event) => {
+        if (!busy && event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div
+        className="w-full max-w-lg rounded-[24px] p-5"
+        style={{
+          background: "linear-gradient(160deg, #081022, #050c1c)",
+          border: "1px solid rgba(239,68,68,0.2)",
+          boxShadow: "0 32px 80px rgba(0,10,60,0.55)",
+        }}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.18em]" style={{ color: "#ff9d9d" }}>
+              Delete recording
+            </p>
+            <h2 className="mt-2 text-lg font-semibold text-white">{recording.roomId}</h2>
+            <p className="mt-1 text-sm" style={{ color: "rgba(255,255,255,0.46)" }}>
+              {recording.folderName}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="flex items-center justify-center rounded-xl transition-opacity hover:opacity-70"
+            style={{
+              width: 34,
+              height: 34,
+              background: "rgba(255,255,255,0.07)",
+              border: "1px solid rgba(255,255,255,0.1)",
+              color: "rgba(255,255,255,0.65)",
+              cursor: busy ? "not-allowed" : "pointer",
+            }}
+            aria-label="Close delete dialog"
+          >
+            x
+          </button>
+        </div>
+
+        <div
+          className="mt-4 rounded-2xl px-4 py-3 text-sm"
+          style={{
+            background: "rgba(239,68,68,0.08)",
+            border: "1px solid rgba(239,68,68,0.16)",
+            color: "rgba(255,210,210,0.92)",
+          }}
+        >
+          This deletes the saved recording entry and any finished linked analysis jobs. Running or
+          queued analysis will block deletion.
+        </div>
+
+        <label
+          className="mt-4 flex items-start gap-3 rounded-2xl px-4 py-3"
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            cursor: busy ? "not-allowed" : "pointer",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={state.deleteStorageFiles}
+            disabled={busy}
+            onChange={(event) => onToggleDeleteStorageFiles(event.target.checked)}
+            className="mt-1"
+          />
+          <span>
+            <span className="block text-sm text-white">Also delete stored recording files</span>
+            <span className="block mt-1 text-xs" style={{ color: "rgba(255,255,255,0.44)" }}>
+              Keep this on to remove the object-storage files too. Clear it if you only want to
+              remove the database entry.
+            </span>
+          </span>
+        </label>
+
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="px-4 py-2 rounded-2xl text-sm"
+            style={{
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.1)",
+              color: "rgba(255,255,255,0.72)",
+              cursor: busy ? "not-allowed" : "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            className="px-4 py-2 rounded-2xl text-sm"
+            style={{
+              background: "rgba(239,68,68,0.14)",
+              border: "1px solid rgba(239,68,68,0.28)",
+              color: "#ffb4b4",
+              cursor: busy ? "not-allowed" : "pointer",
+              fontWeight: 600,
+            }}
+          >
+            {busy ? "Deleting..." : "Delete recording"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ClassPreviewModal({
   preview,
   onClose,
@@ -945,17 +1099,21 @@ function RecordingCard({
   busyAction,
   analysisSummary,
   selectedClassesCount,
+  canDelete,
   onPreview,
   onDownload,
   onAnalyze,
+  onDelete,
 }: {
   recording: RecordingListItem;
   busyAction?: ActionKind;
   analysisSummary?: string;
   selectedClassesCount: number;
+  canDelete: boolean;
   onPreview: (recording: RecordingListItem) => void;
   onDownload: (recording: RecordingListItem) => void;
   onAnalyze: (recording: RecordingListItem) => void;
+  onDelete: (recording: RecordingListItem) => void;
 }) {
   const isBusy = busyAction !== undefined;
   const canAnalyze = selectedClassesCount > 0 && !isBusy;
@@ -1069,6 +1227,24 @@ function RecordingCard({
                 ? `Run AI (${selectedClassesCount})`
                 : "Run AI"}
           </button>
+          {canDelete && (
+            <button
+              type="button"
+              onClick={() => onDelete(recording)}
+              disabled={isBusy}
+              className="px-3 py-2 rounded-2xl text-xs transition-opacity hover:opacity-80"
+              style={{
+                background: "rgba(239,68,68,0.12)",
+                border: "1px solid rgba(239,68,68,0.22)",
+                color: "#ffb4b4",
+                cursor: isBusy ? "not-allowed" : "pointer",
+                fontFamily: "'DM Sans', sans-serif",
+                fontWeight: 600,
+              }}
+            >
+              {busyAction === "delete" ? "Deleting..." : "Delete"}
+            </button>
+          )}
         </div>
       </div>
 
@@ -1551,7 +1727,7 @@ function DetectorJobCard({ job }: { job: DetectorJobStatus }) {
 
 export default function RecordingPage() {
   const navigate = useNavigate();
-  const { setCurrentPage } = useAppContext();
+  const { authSession, setCurrentPage } = useAppContext();
   const previewUrlRef = useRef<string | null>(null);
   const classPreviewUrlRef = useRef<string | null>(null);
 
@@ -1590,6 +1766,10 @@ export default function RecordingPage() {
   const [notificationStateByKey, setNotificationStateByKey] = useState<
     Record<string, ClassNotificationState>
   >({});
+  const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState>({
+    recording: null,
+    deleteStorageFiles: true,
+  });
   const [preview, setPreview] = useState<PreviewState>({
     recording: null,
     url: null,
@@ -1761,6 +1941,13 @@ export default function RecordingPage() {
     });
   }
 
+  function closeDeleteDialog() {
+    setDeleteDialog({
+      recording: null,
+      deleteStorageFiles: true,
+    });
+  }
+
   function resetPreview() {
     if (previewUrlRef.current) {
       window.URL.revokeObjectURL(previewUrlRef.current);
@@ -1922,6 +2109,13 @@ export default function RecordingPage() {
         return current.filter((item) => item !== label);
       }
       return [...current, label];
+    });
+  }
+
+  function handleRequestDelete(recording: RecordingListItem) {
+    setDeleteDialog({
+      recording,
+      deleteStorageFiles: true,
     });
   }
 
@@ -2202,9 +2396,118 @@ export default function RecordingPage() {
     }
   }
 
+  async function handleConfirmDelete() {
+    const recording = deleteDialog.recording;
+    if (!recording) return;
+
+    const deletedJobIds = new Set(
+      recordingAnalysisJobs
+        .filter((job) => job.recordingDetailId === recording.id)
+        .map((job) => job.jobId),
+    );
+
+    updateBusyAction(recording.id, "delete");
+
+    try {
+      await deleteRecording(recording.id, {
+        deleteStorageFiles: deleteDialog.deleteStorageFiles,
+      });
+
+      if (preview.recording?.id === recording.id) {
+        resetPreview();
+      }
+      if (
+        classPreview.recording?.id === recording.id ||
+        classPreview.job?.recordingDetailId === recording.id
+      ) {
+        resetClassPreview();
+      }
+
+      setRecordings((current) => current.filter((item) => item.id !== recording.id));
+      setTotal((current) => Math.max(0, current - 1));
+      setAnalysisSummaryById((current) => {
+        const next = { ...current };
+        delete next[String(recording.id)];
+        return next;
+      });
+      setJobsStatus((current) => {
+        if (!current) return current;
+
+        const nextJobs = current.recordingAnalysisJobs.filter(
+          (job) => job.recordingDetailId !== recording.id,
+        );
+        const removedCount = current.recordingAnalysisJobs.length - nextJobs.length;
+        return {
+          ...current,
+          recordingAnalysisJobs: nextJobs,
+          counts: {
+            ...current.counts,
+            recordingAnalysisJobs: Math.max(
+              0,
+              current.counts.recordingAnalysisJobs - removedCount,
+            ),
+          },
+        };
+      });
+      setJobRefreshLoadingById((current) => {
+        if (deletedJobIds.size === 0) return current;
+
+        const next = { ...current };
+        deletedJobIds.forEach((jobId) => {
+          delete next[jobId];
+        });
+        return next;
+      });
+      setNotificationLoadingByKey((current) => {
+        if (deletedJobIds.size === 0) return current;
+
+        const next = { ...current };
+        Object.keys(next).forEach((key) => {
+          const [jobId] = key.split(":");
+          if (jobId && deletedJobIds.has(jobId)) {
+            delete next[key];
+          }
+        });
+        return next;
+      });
+      setNotificationStateByKey((current) => {
+        if (deletedJobIds.size === 0) return current;
+
+        const next = { ...current };
+        Object.keys(next).forEach((key) => {
+          const [jobId] = key.split(":");
+          if (jobId && deletedJobIds.has(jobId)) {
+            delete next[key];
+          }
+        });
+        return next;
+      });
+      closeDeleteDialog();
+      setBanner({
+        kind: "success",
+        text: deleteDialog.deleteStorageFiles
+          ? `Deleted ${recording.folderName} and its stored files.`
+          : `Deleted ${recording.folderName}.`,
+      });
+      setJobsRefreshKey((value) => value + 1);
+    } catch (deleteError) {
+      setBanner({
+        kind: "error",
+        text:
+          deleteError instanceof Error ? deleteError.message : "Failed to delete recording.",
+      });
+    } finally {
+      updateBusyAction(recording.id);
+    }
+  }
+
   const recordingAnalysisJobs = jobsStatus?.recordingAnalysisJobs ?? [];
   const detectorJobs = jobsStatus?.detectorJobs ?? [];
   const totalJobCount = recordingAnalysisJobs.length + detectorJobs.length;
+  const currentUserId = authSession?.user.id ?? null;
+  const deleteDialogBusy =
+    deleteDialog.recording != null &&
+    busyActionById[String(deleteDialog.recording.id)] === "delete";
 
   return (
     <>
@@ -2773,9 +3076,13 @@ export default function RecordingPage() {
                     busyAction={busyActionById[String(recording.id)]}
                     analysisSummary={analysisSummaryById[String(recording.id)]}
                     selectedClassesCount={selectedClasses.length}
+                    canDelete={
+                      currentUserId != null && recording.createdByUserId === currentUserId
+                    }
                     onPreview={handlePreview}
                     onDownload={handleDownload}
                     onAnalyze={handleAnalyze}
+                    onDelete={handleRequestDelete}
                   />
                 ))}
               </div>
@@ -2790,6 +3097,21 @@ export default function RecordingPage() {
           onClose={resetPreview}
           onDownload={handleDownload}
           downloadBusy={busyActionById[String(preview.recording.id)] === "download"}
+        />
+      )}
+
+      {deleteDialog.recording && (
+        <DeleteRecordingModal
+          state={deleteDialog}
+          busy={deleteDialogBusy}
+          onClose={closeDeleteDialog}
+          onToggleDeleteStorageFiles={(nextValue) =>
+            setDeleteDialog((current) => ({
+              ...current,
+              deleteStorageFiles: nextValue,
+            }))
+          }
+          onConfirm={handleConfirmDelete}
         />
       )}
 

@@ -376,6 +376,22 @@ export async function analyzeRecording(
   return mapRecordingAnalyzeResponse((await response.json()) as RawRecordingAnalyzeResponse)
 }
 
+export async function deleteRecording(
+  recordingId: number,
+  params: { deleteStorageFiles?: boolean } = {},
+): Promise<void> {
+  const searchParams = new URLSearchParams({
+    delete_storage_files: params.deleteStorageFiles ? 'true' : 'false',
+  })
+
+  const response = await fetchWithAuth(`/recordings/${recordingId}?${searchParams.toString()}`, {
+    method: 'DELETE',
+  })
+  if (!response.ok) {
+    throw new Error(await readErrorDetail(response, 'Failed to delete recording.'))
+  }
+}
+
 export async function fetchRecordingAnalysisJob(jobId: string): Promise<RecordingAnalysisJob> {
   const response = await fetchWithAuth(`/recordings/analysis-jobs/${encodeURIComponent(jobId)}`)
   if (!response.ok) {
