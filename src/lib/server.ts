@@ -17,11 +17,25 @@ function toWebsocketProtocol(protocol: string): string {
   return protocol
 }
 
+function getWindowBaseUrl(): URL | null {
+  if (typeof window === 'undefined' || !window.location.origin) {
+    return null
+  }
+
+  try {
+    return new URL(window.location.origin)
+  } catch {
+    return null
+  }
+}
+
 function getReachableBaseUrl(): URL | null {
   const candidates: string[] = []
 
-  if (typeof window !== 'undefined' && window.location.origin) {
-    candidates.push(window.location.origin)
+  const windowBaseUrl = getWindowBaseUrl()
+
+  if (windowBaseUrl) {
+    candidates.push(windowBaseUrl.toString())
   }
 
   if (API_SERVER_URL) {
@@ -58,6 +72,7 @@ export function resolveLivekitServerUrl(value?: string): string {
 
   try {
     const normalized = new URL(candidate)
+    const windowBaseUrl = getWindowBaseUrl()
     const reachableBase = getReachableBaseUrl()
 
     if (
@@ -68,7 +83,11 @@ export function resolveLivekitServerUrl(value?: string): string {
       normalized.hostname = reachableBase.hostname
     }
 
-    normalized.protocol = toWebsocketProtocol(normalized.protocol)
+    normalized.protocol =
+      windowBaseUrl?.protocol === 'https:'
+        ? 'wss:'
+        : toWebsocketProtocol(normalized.protocol)
+
     return normalized.toString().replace(/\/$/, '')
   } catch {
     return candidate
