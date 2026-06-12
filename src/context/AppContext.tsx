@@ -18,17 +18,15 @@ import {
   type AuthSession,
 } from '../lib/auth'
 
-type PageName = 'landing' | 'organisation' | 'dashboard' | 'meetings' | 'recordings'
+type PageName = 'landing' | 'dashboard' | 'meetings' | 'recordings'
 
 interface AppContextValue {
   identifier: string | null
-  selectedOrg: string | null
   currentPage: PageName
   authSession: AuthSession | null
   /** whether the last login used the test bypass credentials */
   isTestLogin: boolean
   setIdentifier: (name: string | null) => void
-  setSelectedOrg: (org: string | null) => void
   setCurrentPage: (page: PageName) => void
   setIsTestLogin: (flag: boolean) => void
   setAuthSession: (session: AuthSession | null) => void
@@ -95,7 +93,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     getAuthUserIdentifier(initialAuthSession?.user),
     ['username'],
   )
-  const [selectedOrg, setSelectedOrg] = usePersistedState<string | null>('selectedOrg', null)
   const [currentPage, setCurrentPage] = useState<PageName>('landing')
   const [isTestLogin, setIsTestLogin] = usePersistedState<boolean>('isTestLogin', false)
   const [authSession, setAuthSessionState] = useState<AuthSession | null>(initialAuthSession)
@@ -117,9 +114,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     clearStoredAuthSession()
     setAuthSessionState(null)
     setIdentifier(null)
-    setSelectedOrg(null)
     setIsTestLogin(false)
-  }, [clearRefreshTimer, setIdentifier, setIsTestLogin, setSelectedOrg])
+  }, [clearRefreshTimer, setIdentifier, setIsTestLogin])
 
   const setAuthSession = useCallback((session: AuthSession | null) => {
     clearRefreshTimer()
@@ -177,12 +173,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <AppContext.Provider
       value={{
         identifier,
-        selectedOrg,
         currentPage,
         authSession,
         isTestLogin,
         setIdentifier,
-        setSelectedOrg,
         setCurrentPage,
         setIsTestLogin,
         setAuthSession,

@@ -12,31 +12,23 @@ import { fetchToken } from './tokenService'
 import { createRoom, connectRoom, disconnectRoom } from './connection'
 import { attachRoomEvents, type MeetingParticipant } from './roomEvents'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 export type MeetingError = 'token' | 'connection' | 'media' | 'disconnected' | null
 
 export interface MeetingState {
-  /** Remote participants converted to the app's Participant type for VideoGrid */
   participants: Participant[]
   connectionState: ConnectionState
   isMuted: boolean
   isCameraOff: boolean
   isScreenSharing: boolean
   error: MeetingError
-  /** Local camera stream — set as srcObject on the local VideoTile */
   localVideoStream: MediaStream | null
-  /** Local microphone stream — used by the audio level analyser */
   localAudioStream: MediaStream | null
-  /** Local screen share stream — passed to the ScreenShare component */
   screenShareStream: MediaStream | null
   toggleMic: () => Promise<void>
   toggleCamera: () => Promise<void>
   toggleScreenShare: () => Promise<void>
   disconnect: () => void
 }
-
-// ─── Conversion ───────────────────────────────────────────────────────────────
 
 function toParticipant(mp: MeetingParticipant): Participant {
   return {
@@ -52,11 +44,11 @@ function toParticipant(mp: MeetingParticipant): Participant {
   }
 }
 
-// ─── Hook ─────────────────────────────────────────────────────────────────────
-
 export function useMeetingRoom(roomId: string, identity: string): MeetingState {
   const roomRef = useRef<Room | null>(null)
   const audioEls = useRef<HTMLAudioElement[]>([])
+  const localScreenTrackRef = useRef<MediaStreamTrack | null>(null)
+  const localScreenEndedHandlerRef = useRef<(() => void) | null>(null)
 
   const [remoteParticipants, setRemoteParticipants] = useState<MeetingParticipant[]>([])
   const [connectionState, setConnectionState] = useState<ConnectionState>(
@@ -70,13 +62,27 @@ export function useMeetingRoom(roomId: string, identity: string): MeetingState {
   const [localAudioStream, setLocalAudioStream] = useState<MediaStream | null>(null)
   const [screenShareStream, setScreenShareStream] = useState<MediaStream | null>(null)
 
+  const clearScreenShareListener = useCallback(() => {
+    if (localScreenTrackRef.current && localScreenEndedHandlerRef.current) {
+      localScreenTrackRef.current.removeEventListener('ended', localScreenEndedHandlerRef.current)
+    }
+
+    localScreenTrackRef.current = null
+    localScreenEndedHandlerRef.current = null
+  }, [])
+
+  const resetScreenShareState = useCallback(() => {
+    clearScreenShareListener()
+    setScreenShareStream(null)
+    setIsScreenSharing(false)
+  }, [clearScreenShareListener])
+
   useEffect(() => {
     let dismounted = false
     const room = createRoom()
     roomRef.current = room
     let detachEvents: (() => void) | null = null
 
-    // ── Audio element management ──────────────────────────────────────────────
     function onAudioSubscribed(track: RemoteTrack) {
       if (track.kind !== Track.Kind.Audio) return
       const el = (track as RemoteAudioTrack).attach() as HTMLAudioElement
@@ -95,10 +101,10 @@ export function useMeetingRoom(roomId: string, identity: string): MeetingState {
     room.on(RoomEvent.TrackSubscribed, onAudioSubscribed)
     room.on(RoomEvent.TrackUnsubscribed, onAudioUnsubscribed)
 
-    // ── Connection flow ───────────────────────────────────────────────────────
     async function join() {
       let token: string
       let serverUrl: string
+
       try {
         ;({ token, serverUrl } = await fetchToken(roomId, identity))
       } catch {
@@ -122,12 +128,10 @@ export function useMeetingRoom(roomId: string, identity: string): MeetingState {
         await room.localParticipant.enableCameraAndMicrophone()
       } catch {
         if (!dismounted) setError('media')
-        // Don't abort — participant can still join without media
       }
 
       if (dismounted) return
 
-      // Capture initial local streams
       const camPub = room.localParticipant.getTrackPublication(Track.Source.Camera)
       const micPub = room.localParticipant.getTrackPublication(Track.Source.Microphone)
 
@@ -140,7 +144,9 @@ export function useMeetingRoom(roomId: string, identity: string): MeetingState {
 
       detachEvents = attachRoomEvents(
         room,
-        (participants) => { if (!dismounted) setRemoteParticipants(participants) },
+        (participants) => {
+          if (!dismounted) setRemoteParticipants(participants)
+        },
         (state) => {
           if (!dismounted) {
             setConnectionState(state)
@@ -150,7 +156,7 @@ export function useMeetingRoom(roomId: string, identity: string): MeetingState {
       )
     }
 
-    join()
+    void join()
 
     return () => {
       dismounted = true
@@ -159,29 +165,24 @@ export function useMeetingRoom(roomId: string, identity: string): MeetingState {
       audioEls.current.forEach((el) => el.remove())
       audioEls.current = []
       detachEvents?.()
+      clearScreenShareListener()
       disconnectRoom(room)
       roomRef.current = null
     }
-  // roomId and identity are stable across the meeting session; re-mounting on
-  // change is the correct behavior (join a different room).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, identity])
-
-  // ── Toggle handlers ───────────────────────────────────────────────────────
+  }, [clearScreenShareListener, roomId, identity])
 
   const toggleMic = useCallback(async () => {
     const room = roomRef.current
     if (!room) return
-    // setMicrophoneEnabled(true) = enable/unmute; pass current isMuted to enable when muted
     await room.localParticipant.setMicrophoneEnabled(isMuted)
-    setIsMuted((m) => !m)
+    setIsMuted((value) => !value)
   }, [isMuted])
 
   const toggleCamera = useCallback(async () => {
     const room = roomRef.current
     if (!room) return
     const pub = await room.localParticipant.setCameraEnabled(isCameraOff)
-    setIsCameraOff((c) => !c)
+    setIsCameraOff((value) => !value)
     const track = pub?.track
     setLocalVideoStream(track ? new MediaStream([track.mediaStreamTrack]) : null)
   }, [isCameraOff])
@@ -189,20 +190,31 @@ export function useMeetingRoom(roomId: string, identity: string): MeetingState {
   const toggleScreenShare = useCallback(async () => {
     const room = roomRef.current
     if (!room) return
+
     try {
       const pub = await room.localParticipant.setScreenShareEnabled(!isScreenSharing)
       const track = pub?.track
+
       if (track) {
-        setScreenShareStream(new MediaStream([track.mediaStreamTrack]))
+        clearScreenShareListener()
+        const mediaTrack = track.mediaStreamTrack
+        const handleEnded = () => {
+          resetScreenShareState()
+          void room.localParticipant.setScreenShareEnabled(false).catch(() => {})
+        }
+
+        mediaTrack.addEventListener('ended', handleEnded)
+        localScreenTrackRef.current = mediaTrack
+        localScreenEndedHandlerRef.current = handleEnded
+        setScreenShareStream(new MediaStream([mediaTrack]))
         setIsScreenSharing(true)
       } else {
-        setScreenShareStream(null)
-        setIsScreenSharing(false)
+        resetScreenShareState()
       }
     } catch {
-      // User cancelled screen share picker — no state change needed
+      // User cancelled screen share picker; keep current state.
     }
-  }, [isScreenSharing])
+  }, [clearScreenShareListener, isScreenSharing, resetScreenShareState])
 
   const disconnect = useCallback(() => {
     const room = roomRef.current

@@ -52,7 +52,6 @@ function VideoTile({
 }: VideoTileProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [hovered, setHovered] = useState(false);
-  const [aspectRatio, setAspectRatio] = useState<string>("16/9");
 
   // Attach MediaStream to <video> whenever it changes
   useEffect(() => {
@@ -61,19 +60,11 @@ function VideoTile({
     }
   }, [participant.stream]);
 
-  // Detect natural aspect ratio from the stream once metadata loads
-  function handleLoadedMetadata() {
-    const v = videoRef.current;
-    if (v && v.videoWidth && v.videoHeight) {
-      setAspectRatio(`${v.videoWidth}/${v.videoHeight}`);
-    }
-  }
-
   const showVideo = !participant.isCameraOff && !!participant.stream;
 
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl select-none ${className}`}
+      className={`relative overflow-hidden rounded-2xl select-none min-h-0 ${className}`}
       style={{
         background: "linear-gradient(135deg, #0d1a3a 0%, #091228 100%)",
         border: participant.isSpeaking
@@ -85,7 +76,8 @@ function VideoTile({
           ? "0 0 0 3px rgba(79,179,255,0.2), 0 8px 32px rgba(0,30,120,0.5)"
           : "0 4px 24px rgba(0,10,60,0.4)",
         transition: "border-color 0.2s ease, box-shadow 0.2s ease",
-        aspectRatio,
+        aspectRatio: "16 / 9",
+        minHeight: 0,
         ...style,
       }}
       onMouseEnter={() => setHovered(true)}
@@ -98,8 +90,7 @@ function VideoTile({
           autoPlay
           playsInline
           muted={participant.isLocal}
-          onLoadedMetadata={handleLoadedMetadata}
-          className="absolute inset-0 w-full h-full object-contain"
+          className="absolute inset-0 w-full h-full object-contain bg-[#060d1e]"
           style={{ transform: participant.isLocal ? "scaleX(-1)" : "none" }}
         />
       ) : (

@@ -2,7 +2,6 @@ import { type ReactElement } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import LandingPage from './pages/LandingPage'
 import Signup from './pages/Signup'
-import Organisation from './pages/Organisation'
 import Meeting from './pages/Meeting'
 import Room from './pages/Room'
 import RecordingPage from './pages/Recording'
@@ -11,10 +10,10 @@ import { AppProvider, useAppContext } from './context/AppContext'
 import { isValidRoomCode } from './lib/meeting/roomCode'
 
 function HomeRoute() {
-  const { authSession, isTestLogin, selectedOrg } = useAppContext()
+  const { authSession, isTestLogin } = useAppContext()
 
   if (authSession || isTestLogin) {
-    return <Navigate to={selectedOrg ? '/dashboard' : '/organizations'} replace />
+    return <Navigate to="/dashboard" replace />
   }
 
   return <LandingPage />
@@ -23,13 +22,6 @@ function HomeRoute() {
 function RequireIdentifier({ children }: { children: ReactElement }) {
   const { identifier } = useAppContext()
   if (!identifier) return <Navigate to="/" replace />
-  return children
-}
-
-function RequireOrganisation({ children }: { children: ReactElement }) {
-  const { identifier, selectedOrg } = useAppContext()
-  if (!identifier) return <Navigate to="/" replace />
-  if (!selectedOrg) return <Navigate to="/organizations" replace />
   return children
 }
 
@@ -50,43 +42,35 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<HomeRoute />} />
       <Route
-        path="/organizations"
-        element={
-          <RequireIdentifier>
-            <Organisation />
-          </RequireIdentifier>
-        }
-      />
-      <Route
         path="/room"
         element={
-          <RequireOrganisation>
+          <RequireIdentifier>
             <Room />
-          </RequireOrganisation>
+          </RequireIdentifier>
         }
       />
       <Route
         path="/dashboard"
         element={
-          <RequireOrganisation>
+          <RequireIdentifier>
             <Dashboard />
-          </RequireOrganisation>
+          </RequireIdentifier>
         }
       />
       <Route
         path="/meetings"
         element={
-          <RequireOrganisation>
+          <RequireIdentifier>
             <MeetingRoute />
-          </RequireOrganisation>
+          </RequireIdentifier>
         }
       />
       <Route
         path="/recordings"
         element={
-          <RequireOrganisation>
+          <RequireIdentifier>
             <RecordingPage />
-          </RequireOrganisation>
+          </RequireIdentifier>
         }
       />
       <Route path="/signup" element={<Signup />} />

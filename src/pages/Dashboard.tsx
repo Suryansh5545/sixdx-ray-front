@@ -13,7 +13,7 @@ import {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { setCurrentPage, selectedOrg, identifier, logout } = useAppContext();
+  const { setCurrentPage, identifier, logout } = useAppContext();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -108,14 +108,6 @@ export default function Dashboard() {
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => navigate("/organizations")}
-                className="top-pill rounded-xl px-4 py-2 text-sm"
-                style={{ ...recordingThemePillButtonStyle, cursor: "pointer" }}
-              >
-                Change organization
-              </button>
-              <button
-                type="button"
                 onClick={() => navigate("/room")}
                 className="top-pill rounded-xl px-4 py-2 text-sm"
                 style={{ ...recordingThemeSecondaryActiveButtonStyle, cursor: "pointer" }}
@@ -154,14 +146,6 @@ export default function Dashboard() {
                 Jump into a live room or head straight to recordings. Everything now follows the
                 same calmer workspace theme as the recordings area.
               </p>
-              {selectedOrg && (
-                <div
-                  className="mt-5 inline-flex items-center rounded-full px-4 py-2 text-sm"
-                  style={recordingThemePillButtonStyle}
-                >
-                  Working in {selectedOrg.charAt(0).toUpperCase() + selectedOrg.slice(1)}
-                </div>
-              )}
             </section>
 
             <section className="mt-10 grid gap-4 md:grid-cols-2">

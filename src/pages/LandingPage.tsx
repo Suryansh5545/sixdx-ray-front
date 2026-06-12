@@ -173,7 +173,7 @@ export default function LandingPage() {
       setIdentifier(form.identifier);
       setIsTestLogin(true);
       setStatus("success");
-      navigate("/organizations");
+      navigate("/dashboard");
       return;
     }
 
@@ -196,7 +196,7 @@ export default function LandingPage() {
       const authResponse = (await response.json()) as AuthResponse;
       setAuthSession(createAuthSession(authResponse));
       setStatus("success");
-      navigate("/organizations");
+      navigate("/dashboard");
     } catch {
       setStatus("error");
       setToast("Login failed, please try again");

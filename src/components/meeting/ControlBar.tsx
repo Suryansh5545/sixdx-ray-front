@@ -1,51 +1,27 @@
 import { useState } from "react";
 import MicButton from "./MicButton";
 import CameraButton from "./CameraButton";
-import RecordButton from "./RecordButton";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 export interface ControlBarProps {
-  /** Mic state */
   isMuted: boolean;
   onToggleMic: () => void;
   audioLevel?: number;
-
-  /** Camera state */
   isCameraOff: boolean;
   onToggleCamera: () => void;
-
-  /** Screen share */
   isScreenSharing: boolean;
   onToggleScreenShare: () => void;
-
-  /** Recording */
-  isRecording: boolean;
-  onToggleRecord: () => void;
-  recordingElapsed?: number;
-
-  /** End call */
   onEndCall: () => void;
-
-  /** Optional: participants count badge */
   participantCount?: number;
   onParticipantsClick?: () => void;
-
-  /** Optional: chat unread badge */
-  chatUnread?: number;
-  onChatClick?: () => void;
-
-  /** Disable individual controls */
   disableMic?: boolean;
   disableCamera?: boolean;
-  disableRecord?: boolean;
   disableScreenShare?: boolean;
-
   className?: string;
 }
 
-// ─── Tooltip wrapper ──────────────────────────────────────────────────────────
 function Tip({ label, children }: { label: string; children: React.ReactNode }) {
   const [show, setShow] = useState(false);
+
   return (
     <div
       className="relative flex flex-col items-center"
@@ -55,7 +31,7 @@ function Tip({ label, children }: { label: string; children: React.ReactNode }) 
       {children}
       {show && (
         <div
-          className="absolute -top-9 px-2.5 py-1 rounded-lg text-xs pointer-events-none whitespace-nowrap z-50"
+          className="absolute -top-9 z-50 whitespace-nowrap rounded-lg px-2.5 py-1 text-xs pointer-events-none"
           style={{
             background: "rgba(5,10,28,0.92)",
             border: "1px solid rgba(255,255,255,0.1)",
@@ -72,7 +48,6 @@ function Tip({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-// ─── Icon button (for generic control actions) ────────────────────────────────
 interface IconBtnProps {
   onClick: () => void;
   active?: boolean;
@@ -127,13 +102,14 @@ function IconBtn({
         {children}
       </button>
 
-      {/* Badge */}
       {!!badge && badge > 0 && (
         <div
           className="absolute flex items-center justify-center rounded-full text-white"
           style={{
-            width: 16, height: 16,
-            top: -3, right: -3,
+            width: 16,
+            height: 16,
+            top: -3,
+            right: -3,
             background: "#1e6bff",
             border: "1.5px solid rgba(10,15,30,0.9)",
             fontSize: "0.6rem",
@@ -148,7 +124,6 @@ function IconBtn({
   );
 }
 
-// ─── Main ControlBar ──────────────────────────────────────────────────────────
 function ControlBar({
   isMuted,
   onToggleMic,
@@ -157,17 +132,11 @@ function ControlBar({
   onToggleCamera,
   isScreenSharing,
   onToggleScreenShare,
-  isRecording,
-  onToggleRecord,
-  recordingElapsed,
   onEndCall,
   participantCount,
   onParticipantsClick,
-  chatUnread,
-  onChatClick,
   disableMic,
   disableCamera,
-  disableRecord,
   disableScreenShare,
   className = "",
 }: ControlBarProps) {
@@ -176,12 +145,12 @@ function ControlBar({
       <style>{`
         @keyframes tipFade {
           from { opacity: 0; transform: translateY(4px); }
-          to   { opacity: 1; transform: translateY(0); }
+          to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
 
       <div
-        className={`flex items-center justify-center gap-3 px-5 py-3 ${className}`}
+        className={`flex max-w-full flex-wrap items-center justify-center gap-3 px-4 py-3 ${className}`}
         style={{
           background: "linear-gradient(to bottom, rgba(8,14,36,0.85), rgba(5,10,28,0.95))",
           backdropFilter: "blur(20px)",
@@ -193,7 +162,6 @@ function ControlBar({
         role="toolbar"
         aria-label="Meeting controls"
       >
-        {/* Mic */}
         <Tip label={isMuted ? "Unmute" : "Mute"}>
           <MicButton
             isMuted={isMuted}
@@ -204,7 +172,6 @@ function ControlBar({
           />
         </Tip>
 
-        {/* Camera */}
         <Tip label={isCameraOff ? "Start video" : "Stop video"}>
           <CameraButton
             isCameraOff={isCameraOff}
@@ -214,7 +181,6 @@ function ControlBar({
           />
         </Tip>
 
-        {/* Screen share */}
         <Tip label={isScreenSharing ? "Stop sharing" : "Share screen"}>
           <IconBtn
             onClick={onToggleScreenShare}
@@ -222,31 +188,25 @@ function ControlBar({
             disabled={disableScreenShare}
             aria-label={isScreenSharing ? "Stop screen share" : "Share screen"}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
               stroke={isScreenSharing ? "#4fb3ff" : "rgba(255,255,255,0.85)"}
-              strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="3" width="20" height="14" rx="2"/>
-              <line x1="8" y1="21" x2="16" y2="21"/>
-              <line x1="12" y1="17" x2="12" y2="21"/>
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="2" y="3" width="20" height="14" rx="2" />
+              <line x1="8" y1="21" x2="16" y2="21" />
+              <line x1="12" y1="17" x2="12" y2="21" />
             </svg>
           </IconBtn>
         </Tip>
 
-        {/* Record */}
-        <Tip label={isRecording ? "Stop recording" : "Record"}>
-          <RecordButton
-            isRecording={isRecording}
-            onToggle={onToggleRecord}
-            elapsedSeconds={recordingElapsed}
-            disabled={disableRecord}
-            size="md"
-          />
-        </Tip>
-
-        {/* Divider */}
         <div style={{ width: 1, height: 28, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
 
-        {/* Participants */}
         {onParticipantsClick && (
           <Tip label="Participants">
             <IconBtn
@@ -254,37 +214,27 @@ function ControlBar({
               badge={participantCount}
               aria-label="Show participants"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-                stroke="rgba(255,255,255,0.8)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/>
-                <circle cx="9" cy="7" r="4"/>
-                <path d="M23 21v-2a4 4 0 00-3-3.87"/>
-                <path d="M16 3.13a4 4 0 010 7.75"/>
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="rgba(255,255,255,0.8)"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 00-3-3.87" />
+                <path d="M16 3.13a4 4 0 010 7.75" />
               </svg>
             </IconBtn>
           </Tip>
         )}
 
-        {/* Chat */}
-        {onChatClick && (
-          <Tip label="Chat">
-            <IconBtn
-              onClick={onChatClick}
-              badge={chatUnread}
-              aria-label="Open chat"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-                stroke="rgba(255,255,255,0.8)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
-              </svg>
-            </IconBtn>
-          </Tip>
-        )}
-
-        {/* Divider */}
         <div style={{ width: 1, height: 28, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />
 
-        {/* End call */}
         <Tip label="End call">
           <button
             onClick={onEndCall}
@@ -295,14 +245,22 @@ function ControlBar({
               height: 48,
               background: "linear-gradient(135deg, rgba(239,68,68,0.55), rgba(185,28,28,0.5))",
               border: "1.5px solid rgba(239,68,68,0.6)",
-              boxShadow: "0 2px 0 rgba(255,120,120,0.2) inset, 0 -1px 0 rgba(120,0,0,0.25) inset, 0 6px 0 rgba(160,0,0,0.25), 0 8px 20px rgba(200,0,0,0.3)",
+              boxShadow: "0 1px 0 rgba(255,180,180,0.18) inset, 0 -1px 0 rgba(120,0,0,0.2) inset, 0 8px 18px rgba(200,0,0,0.22)",
               cursor: "pointer",
             }}
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-              stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M10.68 13.31a16 16 0 003.41 2.6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7 2 2 0 011.72 2v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.42 19.42 0 013.43 9.68 19.79 19.79 0 01.36 1.05 2 2 0 012.34 1h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.32 8.91"/>
-              <line x1="1" y1="1" x2="23" y2="23"/>
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M10.68 13.31a16 16 0 003.41 2.6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7 2 2 0 011.72 2v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.42 19.42 0 013.43 9.68 19.79 19.79 0 01.36 1.05 2 2 0 012.34 1h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.32 8.91" />
+              <line x1="1" y1="1" x2="23" y2="23" />
             </svg>
           </button>
         </Tip>

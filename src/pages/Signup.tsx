@@ -236,7 +236,7 @@ export default function Signup() {
 
       const authResponse = (await response.json()) as AuthResponse;
       setAuthSession(createAuthSession(authResponse));
-      navigate("/organizations");
+      navigate("/dashboard");
     } catch (error) {
       setStatus("error");
       setToast(error instanceof Error ? error.message : "Account creation failed. Please try again.");
@@ -414,8 +414,8 @@ export default function Signup() {
                 Create access once, then move straight into your workspace.
               </h1>
               <p className="mt-4 max-w-xl text-base leading-7" style={recordingThemeMutedTextStyle}>
-                Register your account, select an organization, and you are ready to start rooms,
-                review recordings, and run AI checks from the same flow.
+                Register your account and you are ready to start rooms, review recordings, and run
+                AI checks from the same flow.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
                 {["One-step signup", "Room ready access", "Recording review"].map((item) => (

@@ -11,12 +11,25 @@ export interface VideoGridProps {
 
 // ─── Layout engine ────────────────────────────────────────────────────────────
 function getGridStyle(count: number): React.CSSProperties {
-  if (count === 1) return { gridTemplateColumns: "1fr" };
-  if (count === 2) return { gridTemplateColumns: "repeat(2, 1fr)" };
-  if (count <= 4) return { gridTemplateColumns: "repeat(2, 1fr)" };
-  if (count <= 6) return { gridTemplateColumns: "repeat(3, 1fr)" };
-  if (count <= 9) return { gridTemplateColumns: "repeat(3, 1fr)" };
-  return { gridTemplateColumns: "repeat(4, 1fr)" };
+  let columns = 1;
+
+  if (count === 2) {
+    columns = 2;
+  } else if (count <= 4) {
+    columns = 2;
+  } else if (count <= 9) {
+    columns = 3;
+  } else {
+    columns = 4;
+  }
+
+  const rows = Math.max(1, Math.ceil(count / columns));
+
+  return {
+    gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+    gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+    gridAutoRows: "minmax(0, 1fr)",
+  };
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -61,7 +74,7 @@ function VideoGrid({
             isPinned
             onPin={handlePin}
             className="w-full h-full"
-            style={{ aspectRatio: "unset", height: "100%" }}
+            style={{ height: "100%" }}
           />
         </div>
 
@@ -76,7 +89,7 @@ function VideoGrid({
                 key={p.id}
                 participant={p}
                 onPin={handlePin}
-                style={{ width: 144, minWidth: 144, height: 90, aspectRatio: "unset" }}
+                style={{ width: 144, minWidth: 144, height: 90 }}
               />
             ))}
           </div>
@@ -97,7 +110,7 @@ function VideoGrid({
               onPin={handlePin}
               isPinned={pinnedId === main.id}
               className="w-full h-full"
-              style={{ aspectRatio: "unset", height: "100%" }}
+              style={{ height: "100%" }}
             />
           </div>
         )}
@@ -141,7 +154,7 @@ function VideoGrid({
 
   return (
     <div
-      className={`grid gap-3 w-full ${className}`}
+      className={`grid gap-3 w-full h-full min-h-0 ${className}`}
       style={getGridStyle(participants.length)}
     >
       {participants.map((p) => (
@@ -150,6 +163,7 @@ function VideoGrid({
           participant={p}
           onPin={handlePin}
           isPinned={pinnedId === p.id}
+          className="h-full min-h-0"
         />
       ))}
     </div>
