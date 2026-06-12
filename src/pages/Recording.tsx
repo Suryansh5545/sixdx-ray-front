@@ -14,7 +14,6 @@ import {
   fetchJobsStatus,
   fetchRecordingAnalysisJob,
   fetchSupportedAiClasses,
-  type DetectorJobStatus,
   type JobsStatusResponse,
   getRecordingAnalysisJobId,
   listRecordings,
@@ -158,6 +157,22 @@ function formatStatusLabel(value: string | null | undefined): string {
     .join(" ");
 }
 
+function humanizeSlug(value: string): string {
+  return value
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatReadableFolderName(value: string): string {
+  const match = value.match(/^(.*?)-(\d{8}T\d{6}Z)$/);
+  if (!match) return humanizeSlug(fileNameFromKey(value));
+
+  const [, rawLabel] = match;
+  return humanizeSlug(rawLabel);
+}
+
 function getStatusTone(status: string | null | undefined) {
   if (status === "completed") {
     return {
@@ -185,6 +200,44 @@ function getStatusTone(status: string | null | undefined) {
     border: "rgba(255,255,255,0.12)",
     color: "rgba(255,255,255,0.78)",
   };
+}
+
+function getRecordingAiStatus(
+  recording: RecordingListItem,
+  jobs: RecordingAnalysisJob[],
+): { label: string; tone: ReturnType<typeof getStatusTone> } {
+  const latestJob = jobs
+    .filter((job) => job.recordingDetailId === recording.id)
+    .sort((left, right) => {
+      const leftTime = new Date(left.createdAt).getTime();
+      const rightTime = new Date(right.createdAt).getTime();
+      return rightTime - leftTime;
+    })[0];
+
+  if (!latestJob) {
+    return {
+      label: "AI Not Run",
+      tone: {
+        background: "rgba(255,255,255,0.08)",
+        border: "rgba(255,255,255,0.12)",
+        color: "rgba(255,255,255,0.78)",
+      },
+    };
+  }
+
+  if (latestJob.status === "completed") {
+    return { label: "AI Processed", tone: getStatusTone(latestJob.status) };
+  }
+
+  if (latestJob.status === "completed_with_errors") {
+    return { label: "AI Finished With Errors", tone: getStatusTone(latestJob.status) };
+  }
+
+  if (latestJob.status === "queued" || latestJob.status === "running" || latestJob.status === "starting") {
+    return { label: "AI Running", tone: getStatusTone(latestJob.status) };
+  }
+
+  return { label: "AI Failed", tone: getStatusTone(latestJob.status) };
 }
 
 function getSubJobSummaries(job: RecordingAnalysisJob) {
@@ -358,8 +411,8 @@ function extractRoomIdFromText(value: string | null | undefined): string | null 
   return match?.[0] ?? null;
 }
 
-function getClassNotificationKey(jobId: string, label: string): string {
-  return `${jobId}:${label}`;
+function getClassNotificationKey(jobId: string, label: string, momentId?: string): string {
+  return `${jobId}:${label}:${momentId ?? "class"}`;
 }
 
 function triggerSignedDownload(url: string) {
@@ -677,17 +730,40 @@ function ClassPreviewModal({
   preview,
   onClose,
   onSelectMoment,
+  onNotifyViolation,
+  notificationLoadingByKey,
+  notificationStateByKey,
+  onOpenSignedDownload,
+  onCopySignedDownload,
 }: {
   preview: ClassPreviewState;
   onClose: () => void;
   onSelectMoment: (index: number) => void;
+  onNotifyViolation: (
+    job: RecordingAnalysisJob,
+    label: string,
+    moment: DetectionMoment,
+  ) => void;
+  notificationLoadingByKey: Record<string, boolean>;
+  notificationStateByKey: Record<string, ClassNotificationState>;
+  onOpenSignedDownload: (url: string) => void;
+  onCopySignedDownload: (url: string) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const frameRequestRef = useRef(0);
   const [frameLoading, setFrameLoading] = useState(false);
   const [frameError, setFrameError] = useState<string | null>(null);
   const currentMoment =
     preview.selectedMomentIndex >= 0 ? preview.moments[preview.selectedMomentIndex] ?? null : null;
+  const currentNotificationKey =
+    preview.job && preview.label && currentMoment
+      ? getClassNotificationKey(preview.job.jobId, preview.label, currentMoment.id)
+      : null;
+  const currentNotificationLoading =
+    currentNotificationKey != null && notificationLoadingByKey[currentNotificationKey] === true;
+  const currentNotificationState =
+    currentNotificationKey != null ? notificationStateByKey[currentNotificationKey] ?? null : null;
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -701,6 +777,9 @@ function ClassPreviewModal({
   }, [onClose]);
 
   useEffect(() => {
+    const requestId = frameRequestRef.current + 1;
+    frameRequestRef.current = requestId;
+
     if (
       preview.mediaType !== "video" ||
       !preview.mediaUrl ||
@@ -729,9 +808,76 @@ function ClassPreviewModal({
 
     setFrameLoading(true);
     setFrameError(null);
+    canvas.style.opacity = "0";
+
+    const expectedWidth = moment.frameWidth > 0 ? moment.frameWidth : video.videoWidth;
+    const expectedHeight = moment.frameHeight > 0 ? moment.frameHeight : video.videoHeight;
+    if (expectedWidth > 0 && expectedHeight > 0) {
+      canvas.width = expectedWidth;
+      canvas.height = expectedHeight;
+      drawingContext.clearRect(0, 0, expectedWidth, expectedHeight);
+    }
+
+    function isCurrentRequest() {
+      return !cancelled && frameRequestRef.current === requestId;
+    }
+
+    function waitForEvent(target: EventTarget, eventName: string, timeoutMs: number) {
+      return new Promise<void>((resolve, reject) => {
+        const timeoutId = window.setTimeout(() => {
+          cleanup();
+          reject(new Error(`Timed out waiting for ${eventName}.`));
+        }, timeoutMs);
+
+        function cleanup() {
+          window.clearTimeout(timeoutId);
+          target.removeEventListener(eventName, handleEvent);
+          target.removeEventListener("error", handleError);
+        }
+
+        function handleEvent() {
+          cleanup();
+          resolve();
+        }
+
+        function handleError() {
+          cleanup();
+          reject(new Error("Failed to decode the selected moment from the source recording."));
+        }
+
+        target.addEventListener(eventName, handleEvent, { once: true });
+        target.addEventListener("error", handleError, { once: true });
+      });
+    }
+
+    function waitForNextVideoFrame() {
+      const frameVideo = video as HTMLVideoElement & {
+        requestVideoFrameCallback?: (callback: () => void) => number;
+        cancelVideoFrameCallback?: (handle: number) => void;
+      };
+
+      if (!frameVideo.requestVideoFrameCallback) {
+        return new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => resolve());
+        });
+      }
+
+      return new Promise<void>((resolve) => {
+        const timeoutId = window.setTimeout(resolve, 120);
+        const handle = frameVideo.requestVideoFrameCallback?.(() => {
+          window.clearTimeout(timeoutId);
+          resolve();
+        });
+
+        if (handle == null) {
+          window.clearTimeout(timeoutId);
+          resolve();
+        }
+      });
+    }
 
     function drawCurrentFrame() {
-      if (cancelled) return;
+      if (!isCurrentRequest()) return;
 
       const width = moment.frameWidth > 0 ? moment.frameWidth : video.videoWidth;
       const height = moment.frameHeight > 0 ? moment.frameHeight : video.videoHeight;
@@ -793,11 +939,13 @@ function ClassPreviewModal({
         drawingContext.fillText(text, textX + 8, textY + 4);
       });
 
+      canvas.style.opacity = "1";
       setFrameLoading(false);
     }
 
-    function seekToMoment() {
+    async function seekToMoment() {
       if (moment.sourceTimestampSec == null) {
+        if (!isCurrentRequest()) return;
         setFrameError(
           "This saved detection does not include a source timestamp, so the frame cannot be reconstructed from the original recording.",
         );
@@ -812,35 +960,44 @@ function ClassPreviewModal({
               Math.max(moment.sourceTimestampSec, 0),
               Math.max(duration - 0.001, 0),
             )
-          : Math.max(moment.sourceTimestampSec, 0);
+        : Math.max(moment.sourceTimestampSec, 0);
 
-      void video.pause();
-      video.currentTime = targetTime;
+      try {
+        video.pause();
+
+        if (video.readyState < 2) {
+          await waitForEvent(video, "loadeddata", 5000);
+        }
+        if (!isCurrentRequest()) return;
+
+        if (Math.abs(video.currentTime - targetTime) > 0.015) {
+          video.currentTime = targetTime;
+          await waitForEvent(video, "seeked", 5000);
+        }
+        if (!isCurrentRequest()) return;
+
+        await waitForNextVideoFrame();
+        drawCurrentFrame();
+      } catch (error) {
+        if (!isCurrentRequest()) return;
+        canvas.style.opacity = "0";
+        setFrameError(
+          error instanceof Error
+            ? error.message
+            : "Failed to decode the selected moment from the source recording.",
+        );
+        setFrameLoading(false);
+      }
     }
-
-    function handleSeeked() {
-      drawCurrentFrame();
-    }
-
-    function handleVideoError() {
-      if (cancelled) return;
-      setFrameError("Failed to decode the selected moment from the source recording.");
-      setFrameLoading(false);
-    }
-
-    video.addEventListener("seeked", handleSeeked);
-    video.addEventListener("error", handleVideoError);
 
     if (video.readyState >= 1) {
-      seekToMoment();
+      void seekToMoment();
     } else {
       video.addEventListener("loadedmetadata", seekToMoment, { once: true });
     }
 
     return () => {
       cancelled = true;
-      video.removeEventListener("seeked", handleSeeked);
-      video.removeEventListener("error", handleVideoError);
       video.removeEventListener("loadedmetadata", seekToMoment);
     };
   }, [currentMoment, preview.mediaType, preview.mediaUrl]);
@@ -985,30 +1142,127 @@ function ClassPreviewModal({
             </div>
 
             {currentMoment && (
-              <div className="flex flex-wrap gap-2 mt-3">
-                {getMomentFrameIndex(currentMoment) != null && (
-                  <span
-                    className="px-3 py-1 rounded-full text-[11px]"
-                    style={{
-                      background: "rgba(79,179,255,0.12)",
-                      border: "1px solid rgba(79,179,255,0.24)",
-                      color: "#90caff",
-                    }}
-                  >
-                    Frame {getMomentFrameIndex(currentMoment)}
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap gap-2">
+                  {getMomentFrameIndex(currentMoment) != null && (
+                    <span
+                      className="px-3 py-1 rounded-full text-[11px]"
+                      style={{
+                        background: "rgba(79,179,255,0.12)",
+                        border: "1px solid rgba(79,179,255,0.24)",
+                        color: "#90caff",
+                      }}
+                    >
+                      Frame {getMomentFrameIndex(currentMoment)}
+                    </span>
+                  )}
+                  {currentMoment.sourceTimestampSec != null && (
+                    <span
+                      className="px-3 py-1 rounded-full text-[11px]"
+                      style={{
+                        background: "rgba(255,255,255,0.06)",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        color: "rgba(255,255,255,0.76)",
+                      }}
+                    >
+                      {currentMoment.sourceTimestampSec.toFixed(2)}s
+                    </span>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!preview.job || !preview.label || !currentMoment) return;
+                    onNotifyViolation(preview.job, preview.label, currentMoment);
+                  }}
+                  disabled={currentNotificationLoading || frameLoading || preview.loading}
+                  className="px-4 py-2 rounded-2xl text-xs transition-opacity hover:opacity-80"
+                  style={{
+                    background: "rgba(79,179,255,0.14)",
+                    border: "1px solid rgba(79,179,255,0.24)",
+                    color: "#90caff",
+                    cursor:
+                      currentNotificationLoading || frameLoading || preview.loading
+                        ? "not-allowed"
+                        : "pointer",
+                    opacity: currentNotificationLoading || frameLoading || preview.loading ? 0.65 : 1,
+                    fontWeight: 600,
+                  }}
+                >
+                  {currentNotificationLoading ? "Sending..." : "Notify HSE"}
+                </button>
+              </div>
+            )}
+
+            {currentNotificationState && (
+              <div
+                className="mt-3 rounded-2xl px-3 py-2 text-[11px] flex flex-col gap-2"
+                style={{
+                  background: "rgba(34,197,94,0.08)",
+                  border: "1px solid rgba(34,197,94,0.16)",
+                  color: "rgba(170,245,195,0.92)",
+                }}
+              >
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span>
+                    Email {formatStatusLabel(currentNotificationState.response.status)} to{" "}
+                    {currentNotificationState.response.recipient || "configured recipient"}
                   </span>
-                )}
-                {currentMoment.sourceTimestampSec != null && (
-                  <span
-                    className="px-3 py-1 rounded-full text-[11px]"
-                    style={{
-                      background: "rgba(255,255,255,0.06)",
-                      border: "1px solid rgba(255,255,255,0.1)",
-                      color: "rgba(255,255,255,0.76)",
-                    }}
-                  >
-                    {currentMoment.sourceTimestampSec.toFixed(2)}s
+                  <span style={{ color: "rgba(170,245,195,0.74)" }}>
+                    {formatDate(currentNotificationState.sentAt)}
                   </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span>
+                    Attachment{" "}
+                    {currentNotificationState.response.attachmentIncluded
+                      ? "included"
+                      : "not included"}
+                  </span>
+                  {currentNotificationState.response.subject && (
+                    <span
+                      className="truncate"
+                      style={{ color: "rgba(170,245,195,0.78)" }}
+                      title={currentNotificationState.response.subject}
+                    >
+                      {currentNotificationState.response.subject}
+                    </span>
+                  )}
+                </div>
+                {currentNotificationState.response.downloadUrl && (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onOpenSignedDownload(currentNotificationState.response.downloadUrl as string)
+                      }
+                      className="px-2.5 py-1 rounded-full text-[10px] transition-opacity hover:opacity-80"
+                      style={{
+                        background: "rgba(255,255,255,0.06)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        color: "rgba(255,255,255,0.82)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Open signed link
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onCopySignedDownload(currentNotificationState.response.downloadUrl as string)
+                      }
+                      className="px-2.5 py-1 rounded-full text-[10px] transition-opacity hover:opacity-80"
+                      style={{
+                        background: "rgba(255,255,255,0.06)",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        color: "rgba(255,255,255,0.82)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Copy link
+                    </button>
+                  </div>
                 )}
               </div>
             )}
@@ -1098,25 +1352,43 @@ function RecordingCard({
   recording,
   busyAction,
   analysisSummary,
+  aiStatus,
+  analysisJobs,
+  analysisLoading,
+  analysisError,
+  jobRefreshLoadingById,
   selectedClassesCount,
   canDelete,
   onPreview,
   onDownload,
   onAnalyze,
   onDelete,
+  onRefreshAnalysisJob,
+  onOpenClassPreview,
 }: {
   recording: RecordingListItem;
   busyAction?: ActionKind;
   analysisSummary?: string;
+  aiStatus: { label: string; tone: ReturnType<typeof getStatusTone> };
+  analysisJobs: RecordingAnalysisJob[];
+  analysisLoading: boolean;
+  analysisError: string | null;
+  jobRefreshLoadingById: Record<string, boolean>;
   selectedClassesCount: number;
   canDelete: boolean;
   onPreview: (recording: RecordingListItem) => void;
   onDownload: (recording: RecordingListItem) => void;
   onAnalyze: (recording: RecordingListItem) => void;
   onDelete: (recording: RecordingListItem) => void;
+  onRefreshAnalysisJob: (jobId: string) => void;
+  onOpenClassPreview: (job: RecordingAnalysisJob, label: string, subJobId: string | null) => void;
 }) {
   const isBusy = busyAction !== undefined;
   const canAnalyze = selectedClassesCount > 0 && !isBusy;
+  const displayTitle =
+    recording.recordingRoot === "hse_safety_audit"
+      ? formatReadableFolderName(recording.folderName)
+      : recording.roomId;
 
   return (
     <article
@@ -1150,22 +1422,34 @@ function RecordingCard({
             >
               {roomTypeLabel(recording.roomType)}
             </span>
+            <span
+              className="px-2.5 py-1 rounded-full text-[11px]"
+              style={{
+                background: aiStatus.tone.background,
+                border: `1px solid ${aiStatus.tone.border}`,
+                color: aiStatus.tone.color,
+              }}
+            >
+              {aiStatus.label}
+            </span>
           </div>
 
-          <h2 className="text-lg font-semibold text-white tracking-tight">{recording.roomId}</h2>
+          <h2 className="text-lg font-semibold text-white tracking-tight">{displayTitle}</h2>
           <p
             className="text-sm mt-1"
             style={{ color: "rgba(255,255,255,0.56)" }}
           >
             {formatDate(recording.createdAt)}
           </p>
-          <p
-            className="text-sm mt-2 truncate"
-            style={{ color: "rgba(255,255,255,0.4)" }}
-            title={recording.folderName}
-          >
-            {fileNameFromKey(recording.folderName)}
-          </p>
+          {recording.recordingRoot !== "hse_safety_audit" && (
+            <p
+              className="text-sm mt-2 truncate"
+              style={{ color: "rgba(255,255,255,0.4)" }}
+              title={recording.folderName}
+            >
+              {fileNameFromKey(recording.folderName)}
+            </p>
+          )}
 
           <div
             className="flex flex-wrap gap-x-4 gap-y-2 mt-3 text-xs"
@@ -1266,6 +1550,59 @@ function RecordingCard({
         </div>
       )}
 
+      {recording.recordingRoot === "hse_safety_audit" && (
+        <details
+          className="rounded-2xl px-3 py-2"
+          style={{
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.06)",
+          }}
+        >
+          <summary
+            className="flex items-center justify-between gap-3 text-xs cursor-pointer"
+            style={{ color: "rgba(255,255,255,0.72)" }}
+          >
+            <span>AI completion results</span>
+            <span style={{ color: "rgba(255,255,255,0.42)" }}>
+              {analysisJobs.length > 0
+                ? `${analysisJobs.length} run${analysisJobs.length === 1 ? "" : "s"}`
+                : "Not run"}
+            </span>
+          </summary>
+
+          <div className="grid grid-cols-1 gap-3 mt-3">
+            {analysisLoading && analysisJobs.length === 0 && (
+              <p className="text-xs" style={{ color: "rgba(255,255,255,0.42)" }}>
+                Loading AI results...
+              </p>
+            )}
+
+            {analysisError && (
+              <p className="text-xs" style={{ color: "rgba(255,170,170,0.92)" }}>
+                {analysisError}
+              </p>
+            )}
+
+            {!analysisLoading && !analysisError && analysisJobs.length === 0 && (
+              <p className="text-xs" style={{ color: "rgba(255,255,255,0.42)" }}>
+                AI processing has not run on this audit yet.
+              </p>
+            )}
+
+            {analysisJobs.map((job) => (
+              <AnalysisJobCard
+                key={job.jobId}
+                job={job}
+                loading={jobRefreshLoadingById[job.jobId] === true}
+                hideIdentity
+                onRefresh={onRefreshAnalysisJob}
+                onOpenClassPreview={onOpenClassPreview}
+              />
+            ))}
+          </div>
+        </details>
+      )}
+
       <details
         className="rounded-2xl px-3 py-2"
         style={{
@@ -1323,23 +1660,15 @@ function RecordingCard({
 function AnalysisJobCard({
   job,
   loading,
+  hideIdentity = false,
   onRefresh,
   onOpenClassPreview,
-  onNotifyViolation,
-  notificationLoadingByKey,
-  notificationStateByKey,
-  onOpenSignedDownload,
-  onCopySignedDownload,
 }: {
   job: RecordingAnalysisJob;
   loading: boolean;
+  hideIdentity?: boolean;
   onRefresh: (jobId: string) => void;
   onOpenClassPreview: (job: RecordingAnalysisJob, label: string, subJobId: string | null) => void;
-  onNotifyViolation: (job: RecordingAnalysisJob, label: string) => void;
-  notificationLoadingByKey: Record<string, boolean>;
-  notificationStateByKey: Record<string, ClassNotificationState>;
-  onOpenSignedDownload: (url: string) => void;
-  onCopySignedDownload: (url: string) => void;
 }) {
   const tone = getStatusTone(job.status);
   const subJobs = getSubJobSummaries(job);
@@ -1359,14 +1688,18 @@ function AnalysisJobCard({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-white font-medium text-sm">{job.jobId}</p>
-          <p
-            className="text-xs mt-1 truncate"
-            style={{ color: "rgba(255,255,255,0.42)" }}
-            title={job.sourceName || `recording-${job.recordingDetailId}`}
-          >
-            {job.sourceName || `recording-${job.recordingDetailId}`}
+          <p className="text-white font-medium text-sm">
+            {hideIdentity ? "AI processing result" : job.jobId}
           </p>
+          {!hideIdentity && (
+            <p
+              className="text-xs mt-1 truncate"
+              style={{ color: "rgba(255,255,255,0.42)" }}
+              title={job.sourceName || `recording-${job.recordingDetailId}`}
+            >
+              {job.sourceName || `recording-${job.recordingDetailId}`}
+            </p>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -1442,11 +1775,8 @@ function AnalysisJobCard({
             {subJobs.map((subJob) => {
               const subTone = getStatusTone(subJob.state);
               const moments = getClassDetectionMoments(job, subJob.label);
-              const canPreviewClass = previewEnabled && (moments.length > 0 || subJob.jobId != null);
-              const canNotifyClass = previewEnabled && moments.length > 0;
-              const notificationKey = getClassNotificationKey(job.jobId, subJob.label);
-              const notificationState = notificationStateByKey[notificationKey] ?? null;
-              const notificationLoading = notificationLoadingByKey[notificationKey] === true;
+              const hasViolations = moments.length > 0;
+              const canPreviewClass = previewEnabled && hasViolations;
               return (
                 <div
                   key={`${job.jobId}-${subJob.label}`}
@@ -1459,7 +1789,7 @@ function AnalysisJobCard({
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-xs text-white">{formatClassLabel(subJob.label)}</p>
-                      {subJob.jobId && (
+                      {!hideIdentity && subJob.jobId && (
                         <p
                           className="text-[11px] mt-1 truncate"
                           style={{ color: "rgba(255,255,255,0.4)", fontFamily: "monospace" }}
@@ -1485,104 +1815,26 @@ function AnalysisJobCard({
                       {subJob.lastError}
                     </p>
                   )}
-                  {(canPreviewClass || canNotifyClass) && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {canPreviewClass && (
-                        <button
-                          type="button"
-                          onClick={() => onOpenClassPreview(job, subJob.label, subJob.jobId)}
-                          className="px-3 py-1.5 rounded-2xl text-[11px] transition-opacity hover:opacity-80"
-                          style={{
-                            background: "rgba(255,255,255,0.06)",
-                            border: "1px solid rgba(255,255,255,0.1)",
-                            color: "rgba(255,255,255,0.82)",
-                            cursor: "pointer",
-                          }}
-                        >
-                          Open preview
-                        </button>
-                      )}
-                      {canNotifyClass && (
-                        <button
-                          type="button"
-                          onClick={() => onNotifyViolation(job, subJob.label)}
-                          disabled={notificationLoading}
-                          className="px-3 py-1.5 rounded-2xl text-[11px] transition-opacity hover:opacity-80"
-                          style={{
-                            background: "rgba(79,179,255,0.1)",
-                            border: "1px solid rgba(79,179,255,0.18)",
-                            color: "#90caff",
-                            cursor: notificationLoading ? "not-allowed" : "pointer",
-                            opacity: notificationLoading ? 0.6 : 1,
-                          }}
-                        >
-                          {notificationLoading ? "Sending..." : "Notify HSE"}
-                        </button>
-                      )}
-                    </div>
+                  {previewEnabled && !hasViolations && !subJob.lastError && (
+                    <p className="text-[11px] mt-3" style={{ color: "rgba(170,245,195,0.82)" }}>
+                      No violation detected
+                    </p>
                   )}
-                  {notificationState && (
-                    <div
-                      className="mt-3 rounded-2xl px-3 py-2 text-[11px] flex flex-col gap-2"
-                      style={{
-                        background: "rgba(34,197,94,0.08)",
-                        border: "1px solid rgba(34,197,94,0.16)",
-                        color: "rgba(170,245,195,0.92)",
-                      }}
-                    >
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                        <span>
-                          Email {formatStatusLabel(notificationState.response.status)} to{" "}
-                          {notificationState.response.recipient || "configured recipient"}
-                        </span>
-                        <span style={{ color: "rgba(170,245,195,0.74)" }}>
-                          {formatDate(notificationState.sentAt)}
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                        <span>
-                          Attachment {notificationState.response.attachmentIncluded ? "included" : "not included"}
-                        </span>
-                        {notificationState.response.subject && (
-                          <span
-                            className="truncate"
-                            style={{ color: "rgba(170,245,195,0.78)" }}
-                            title={notificationState.response.subject}
-                          >
-                            {notificationState.response.subject}
-                          </span>
-                        )}
-                      </div>
-                      {notificationState.response.downloadUrl && (
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => onOpenSignedDownload(notificationState.response.downloadUrl as string)}
-                            className="px-2.5 py-1 rounded-full text-[10px] transition-opacity hover:opacity-80"
-                            style={{
-                              background: "rgba(255,255,255,0.06)",
-                              border: "1px solid rgba(255,255,255,0.12)",
-                              color: "rgba(255,255,255,0.82)",
-                              cursor: "pointer",
-                            }}
-                          >
-                            Open signed link
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onCopySignedDownload(notificationState.response.downloadUrl as string)}
-                            className="px-2.5 py-1 rounded-full text-[10px] transition-opacity hover:opacity-80"
-                            style={{
-                              background: "rgba(255,255,255,0.06)",
-                              border: "1px solid rgba(255,255,255,0.12)",
-                              color: "rgba(255,255,255,0.82)",
-                              cursor: "pointer",
-                            }}
-                          >
-                            Copy link
-                          </button>
-                        </div>
-                      )}
+                  {canPreviewClass && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onOpenClassPreview(job, subJob.label, subJob.jobId)}
+                        className="px-3 py-1.5 rounded-2xl text-[11px] transition-opacity hover:opacity-80"
+                        style={{
+                          background: "rgba(255,255,255,0.06)",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          color: "rgba(255,255,255,0.82)",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Open preview
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1605,7 +1857,7 @@ function AnalysisJobCard({
         </div>
       )}
 
-      {(job.aggregateResult || job.subJobs) && (
+      {!hideIdentity && (job.aggregateResult || job.subJobs) && (
         <details
           className="rounded-2xl px-3 py-2"
           style={{
@@ -1654,91 +1906,12 @@ function AnalysisJobCard({
   );
 }
 
-function DetectorJobCard({ job }: { job: DetectorJobStatus }) {
-  const tone = getStatusTone(job.state);
-
-  return (
-    <div
-      className="rounded-[22px] p-4 flex flex-col gap-3"
-      style={{
-        background: "rgba(255,255,255,0.03)",
-        border: "1px solid rgba(255,255,255,0.08)",
-      }}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-white font-medium text-sm">{job.jobId}</p>
-          <p
-            className="text-xs mt-1 truncate"
-            style={{ color: "rgba(255,255,255,0.42)" }}
-            title={job.sourceName || "Live detector job"}
-          >
-            {job.sourceName || "Live detector job"}
-          </p>
-        </div>
-        <span
-          className="px-2.5 py-1 rounded-full text-[11px]"
-          style={{
-            background: tone.background,
-            border: `1px solid ${tone.border}`,
-            color: tone.color,
-          }}
-        >
-          {formatStatusLabel(job.state)}
-        </span>
-      </div>
-
-      <div className="flex flex-wrap gap-2 text-xs">
-        <span
-          className="px-2.5 py-1 rounded-full"
-          style={{
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            color: "rgba(255,255,255,0.7)",
-          }}
-        >
-          Frames {job.framesProcessed ?? 0}
-        </span>
-        <span
-          className="px-2.5 py-1 rounded-full"
-          style={{
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            color: "rgba(255,255,255,0.7)",
-          }}
-        >
-          Events {job.eventsWritten ?? 0}
-        </span>
-      </div>
-
-      {(job.startedAt || job.lastFrameAt) && (
-        <p className="text-xs" style={{ color: "rgba(255,255,255,0.45)" }}>
-          {job.startedAt ? `Started ${formatDate(job.startedAt)}` : "Started recently"}
-          {job.lastFrameAt ? ` - Last frame ${formatDate(job.lastFrameAt)}` : ""}
-        </p>
-      )}
-
-      {job.lastError && (
-        <div
-          className="rounded-2xl px-3 py-2 text-xs"
-          style={{
-            background: "rgba(239,68,68,0.1)",
-            border: "1px solid rgba(239,68,68,0.22)",
-            color: "rgba(255,170,170,0.92)",
-          }}
-        >
-          {job.lastError}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function RecordingPage() {
   const navigate = useNavigate();
   const { authSession, setCurrentPage } = useAppContext();
   const previewUrlRef = useRef<string | null>(null);
-  const classPreviewUrlRef = useRef<string | null>(null);
+  const classPreviewRequestRef = useRef(0);
+  const classPreviewMediaCacheRef = useRef<Record<string, { url: string; filename: string }>>({});
 
   const [recordingRoot, setRecordingRoot] = useState<RecordingRoot>("livekit_recordings");
   const [roomIdInput, setRoomIdInput] = useState("");
@@ -1763,7 +1936,6 @@ export default function RecordingPage() {
   const [classesError, setClassesError] = useState<string | null>(null);
   const [modelPath, setModelPath] = useState<string | null>(null);
   const [modelClasses, setModelClasses] = useState<string[]>([]);
-  const [includeCompletedJobs, setIncludeCompletedJobs] = useState(false);
   const [jobsStatus, setJobsStatus] = useState<JobsStatusResponse | null>(null);
   const [jobsLoading, setJobsLoading] = useState(true);
   const [jobsError, setJobsError] = useState<string | null>(null);
@@ -1862,7 +2034,7 @@ export default function RecordingPage() {
       setJobsError(null);
 
       try {
-        const response = await fetchJobsStatus(includeCompletedJobs);
+        const response = await fetchJobsStatus(true);
         if (cancelled) return;
 
         setJobsStatus(response);
@@ -1886,7 +2058,7 @@ export default function RecordingPage() {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [includeCompletedJobs, jobsRefreshKey]);
+  }, [jobsRefreshKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1931,9 +2103,10 @@ export default function RecordingPage() {
       if (previewUrlRef.current) {
         window.URL.revokeObjectURL(previewUrlRef.current);
       }
-      if (classPreviewUrlRef.current) {
-        window.URL.revokeObjectURL(classPreviewUrlRef.current);
-      }
+      Object.values(classPreviewMediaCacheRef.current).forEach((item) => {
+        window.URL.revokeObjectURL(item.url);
+      });
+      classPreviewMediaCacheRef.current = {};
     };
   }, []);
 
@@ -1973,10 +2146,7 @@ export default function RecordingPage() {
   }
 
   function resetClassPreview() {
-    if (classPreviewUrlRef.current) {
-      window.URL.revokeObjectURL(classPreviewUrlRef.current);
-      classPreviewUrlRef.current = null;
-    }
+    classPreviewRequestRef.current += 1;
 
     setClassPreview({
       job: null,
@@ -1991,6 +2161,16 @@ export default function RecordingPage() {
       loading: false,
       error: null,
       note: null,
+    });
+  }
+
+  function clearCachedClassPreviewMedia(recordingId: number) {
+    const prefix = `${recordingId}:`;
+    Object.entries(classPreviewMediaCacheRef.current).forEach(([key, item]) => {
+      if (key.startsWith(prefix)) {
+        window.URL.revokeObjectURL(item.url);
+        delete classPreviewMediaCacheRef.current[key];
+      }
     });
   }
 
@@ -2034,9 +2214,10 @@ export default function RecordingPage() {
     label: string,
     subJobId: string | null,
   ) {
+    const requestId = classPreviewRequestRef.current + 1;
+    classPreviewRequestRef.current = requestId;
     const moments = getClassDetectionMoments(job, label);
 
-    resetClassPreview();
     setClassPreview({
       job,
       recording: null,
@@ -2054,25 +2235,36 @@ export default function RecordingPage() {
 
     try {
       const matchedRecording = await resolveRecordingForJob(job);
+      if (classPreviewRequestRef.current !== requestId) return;
 
       if (matchedRecording) {
         const selectedFilename = job.selectedObjectKey
           ? fileNameFromKey(job.selectedObjectKey)
           : undefined;
-        const file = await downloadRecordingFile(matchedRecording.id, {
-          folderName: matchedRecording.folderName,
-          filename: selectedFilename,
-        });
-        const objectUrl = window.URL.createObjectURL(file.blob);
-        classPreviewUrlRef.current = objectUrl;
+        const cacheKey = `${matchedRecording.id}:${selectedFilename ?? ""}`;
+        let cachedMedia = classPreviewMediaCacheRef.current[cacheKey];
+
+        if (!cachedMedia) {
+          const file = await downloadRecordingFile(matchedRecording.id, {
+            folderName: matchedRecording.folderName,
+            filename: selectedFilename,
+          });
+          if (classPreviewRequestRef.current !== requestId) return;
+
+          cachedMedia = {
+            url: window.URL.createObjectURL(file.blob),
+            filename: file.filename,
+          };
+          classPreviewMediaCacheRef.current[cacheKey] = cachedMedia;
+        }
 
         setClassPreview((current) => ({
           ...current,
           recording: matchedRecording,
           loading: false,
           mediaType: "video",
-          mediaUrl: objectUrl,
-          mediaFilename: file.filename,
+          mediaUrl: cachedMedia.url,
+          mediaFilename: cachedMedia.filename,
           note:
             moments.length > 0
               ? "Showing the saved frame directly from the original recording with bounding boxes drawn from the stored JSON."
@@ -2088,6 +2280,7 @@ export default function RecordingPage() {
           "The original recording could not be resolved for this job, so the saved frame cannot be reconstructed from video.",
       }));
     } catch (previewError) {
+      if (classPreviewRequestRef.current !== requestId) return;
       setClassPreview((current) => ({
         ...current,
         loading: false,
@@ -2169,11 +2362,14 @@ export default function RecordingPage() {
     }
   }
 
-  async function handleNotifyViolation(job: RecordingAnalysisJob, label: string) {
-    const notificationKey = getClassNotificationKey(job.jobId, label);
-    const moments = getClassDetectionMoments(job, label);
+  async function handleNotifyViolation(
+    job: RecordingAnalysisJob,
+    label: string,
+    moment: DetectionMoment,
+  ) {
+    const notificationKey = getClassNotificationKey(job.jobId, label, moment.id);
 
-    if (moments.length === 0) {
+    if (moment.events.length === 0) {
       setBanner({
         kind: "error",
         text: `No saved ${formatClassLabel(label)} violations were found to email.`,
@@ -2195,7 +2391,6 @@ export default function RecordingPage() {
         extractRoomIdFromText(selectedFilename) ??
         extractRoomIdFromText(job.sourceName) ??
         undefined;
-      const firstMoment = moments[0] ?? null;
 
       const response = await sendHseViolationEmail({
         violationLabel: label,
@@ -2204,7 +2399,22 @@ export default function RecordingPage() {
         filename: selectedFilename,
         recordingDetailId: job.recordingDetailId,
         analysisJobId: job.jobId,
-        detectedAt: firstMoment?.detectedAt ?? undefined,
+        detectedAt: moment.detectedAt,
+        details: {
+          selected_moment_id: moment.id,
+          source_timestamp_sec: moment.sourceTimestampSec,
+          frame_index: getMomentFrameIndex(moment),
+          frame_width: moment.frameWidth,
+          frame_height: moment.frameHeight,
+          events: moment.events.map((event) => ({
+            label: event.label,
+            class_name: event.className,
+            confidence: event.confidence,
+            bbox: event.bbox,
+            frame: event.frame,
+            time: event.time,
+          })),
+        },
       });
 
       setNotificationStateByKey((current) => ({
@@ -2361,7 +2571,7 @@ export default function RecordingPage() {
         const analysisJob = response.analysisJob;
         if (!current) {
           return {
-            includeCompleted: includeCompletedJobs,
+            includeCompleted: true,
             detectorJobs: [],
             recordingAnalysisJobs: [analysisJob],
             counts: {
@@ -2410,7 +2620,7 @@ export default function RecordingPage() {
     if (!recording) return;
 
     const deletedJobIds = new Set(
-      recordingAnalysisJobs
+      allRecordingAnalysisJobs
         .filter((job) => job.recordingDetailId === recording.id)
         .map((job) => job.jobId),
     );
@@ -2434,6 +2644,7 @@ export default function RecordingPage() {
 
       setRecordings((current) => current.filter((item) => item.id !== recording.id));
       setTotal((current) => Math.max(0, current - 1));
+      clearCachedClassPreviewMedia(recording.id);
       setAnalysisSummaryById((current) => {
         const next = { ...current };
         delete next[String(recording.id)];
@@ -2510,9 +2721,7 @@ export default function RecordingPage() {
     }
   }
 
-  const recordingAnalysisJobs = jobsStatus?.recordingAnalysisJobs ?? [];
-  const detectorJobs = jobsStatus?.detectorJobs ?? [];
-  const totalJobCount = recordingAnalysisJobs.length + detectorJobs.length;
+  const allRecordingAnalysisJobs = jobsStatus?.recordingAnalysisJobs ?? [];
   const currentUserId = authSession?.user.id ?? null;
   const deleteDialogBusy =
     deleteDialog.recording != null &&
@@ -2599,7 +2808,9 @@ export default function RecordingPage() {
                   Browse recordings, preview them, and run AI review from one calmer workspace.
                 </p>
                 <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.3)" }}>
-                  {recordings.length} shown in {ROOT_OPTIONS.find((option) => option.value === recordingRoot)?.label}.
+                  {recordings.length} shown
+                  {total > recordings.length ? ` of ${total}` : ""} in{" "}
+                  {ROOT_OPTIONS.find((option) => option.value === recordingRoot)?.label}.
                 </p>
               </div>
 
@@ -2716,7 +2927,7 @@ export default function RecordingPage() {
             </form>
 
             {recordingRoot === "hse_safety_audit" && (
-              <div className="grid grid-cols-1 xl:grid-cols-[1.02fr_0.98fr] gap-4 items-start">
+              <div className="grid grid-cols-1 gap-4 items-start">
                 <section
                   className="rounded-[24px] p-5"
                   style={{
@@ -2820,164 +3031,6 @@ export default function RecordingPage() {
                   </details>
                 </section>
 
-                <section
-                  className="rounded-[24px] p-5"
-                  style={{
-                    background: "rgba(255,255,255,0.04)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                  }}
-                >
-                  <details>
-                    <summary
-                      className="flex items-center justify-between gap-3 cursor-pointer"
-                      style={{ listStyle: "none" }}
-                    >
-                      <div>
-                        <h2 className="text-white font-medium">Jobs</h2>
-                        <p className="text-sm mt-1" style={{ color: "rgba(255,255,255,0.38)" }}>
-                          Track running and completed detector work without leaving the page.
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-2 text-xs">
-                        <span
-                          className="px-2.5 py-1 rounded-full"
-                          style={{
-                            background: "rgba(255,255,255,0.06)",
-                            border: "1px solid rgba(255,255,255,0.1)",
-                            color: "rgba(255,255,255,0.78)",
-                          }}
-                        >
-                          {recordingAnalysisJobs.length} analysis
-                        </span>
-                        <span
-                          className="px-2.5 py-1 rounded-full"
-                          style={{
-                            background: "rgba(255,255,255,0.06)",
-                            border: "1px solid rgba(255,255,255,0.1)",
-                            color: "rgba(255,255,255,0.78)",
-                          }}
-                        >
-                          {detectorJobs.length} detector
-                        </span>
-                        <span
-                          className="px-2.5 py-1 rounded-full"
-                          style={{
-                            background: "rgba(255,255,255,0.06)",
-                            border: "1px solid rgba(255,255,255,0.1)",
-                            color: "rgba(255,255,255,0.78)",
-                          }}
-                        >
-                          {totalJobCount} total
-                        </span>
-                      </div>
-                    </summary>
-
-                    <div className="mt-5">
-                      <div className="flex items-center justify-between gap-3 mb-4">
-                        <label
-                          className="flex items-center gap-2 text-sm"
-                          style={{ color: "rgba(255,255,255,0.7)" }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={includeCompletedJobs}
-                            onChange={(event) => setIncludeCompletedJobs(event.target.checked)}
-                          />
-                          Include completed jobs
-                        </label>
-
-                        <button
-                          type="button"
-                          onClick={() => setJobsRefreshKey((value) => value + 1)}
-                          className="px-3 py-2 rounded-full text-xs"
-                          style={{
-                            background: "rgba(255,255,255,0.06)",
-                            border: "1px solid rgba(255,255,255,0.1)",
-                            color: "rgba(255,255,255,0.76)",
-                            cursor: "pointer",
-                          }}
-                        >
-                          Refresh jobs
-                        </button>
-                      </div>
-
-                      {jobsLoading && !jobsStatus && (
-                        <p className="text-sm" style={{ color: "rgba(255,255,255,0.38)" }}>
-                          Loading jobs...
-                        </p>
-                      )}
-
-                      {jobsError && (
-                        <p className="text-sm mb-4" style={{ color: "rgba(255,170,170,0.92)" }}>
-                          {jobsError}
-                        </p>
-                      )}
-
-                      <div className="grid grid-cols-1 gap-4">
-                        <div>
-                          <div className="flex items-center justify-between mb-3">
-                            <h3 className="text-sm text-white">Recording analysis jobs</h3>
-                            <span className="text-xs" style={{ color: "rgba(255,255,255,0.36)" }}>
-                              Parent jobs saved by job id
-                            </span>
-                          </div>
-
-                          <div className="grid grid-cols-1 gap-3">
-                            {recordingAnalysisJobs.length === 0 && (
-                              <p className="text-sm" style={{ color: "rgba(255,255,255,0.34)" }}>
-                                No matching analysis jobs right now.
-                              </p>
-                            )}
-                            {recordingAnalysisJobs.map((job) => (
-                              <AnalysisJobCard
-                                key={job.jobId}
-                                job={job}
-                                loading={jobRefreshLoadingById[job.jobId] === true}
-                                onRefresh={refreshAnalysisJob}
-                                onOpenClassPreview={openClassPreview}
-                                onNotifyViolation={handleNotifyViolation}
-                                notificationLoadingByKey={notificationLoadingByKey}
-                                notificationStateByKey={notificationStateByKey}
-                                onOpenSignedDownload={handleOpenSignedDownload}
-                                onCopySignedDownload={handleCopySignedDownload}
-                              />
-                            ))}
-                          </div>
-                        </div>
-
-                        <details
-                          className="rounded-2xl px-3 py-2"
-                          style={{
-                            background: "rgba(255,255,255,0.03)",
-                            border: "1px solid rgba(255,255,255,0.06)",
-                          }}
-                        >
-                          <summary
-                            className="flex items-center justify-between gap-3 cursor-pointer text-sm"
-                            style={{ color: "rgba(255,255,255,0.78)" }}
-                          >
-                            <span>Detector jobs</span>
-                            <span style={{ color: "rgba(255,255,255,0.42)" }}>
-                              {detectorJobs.length} live worker{detectorJobs.length === 1 ? "" : "s"}
-                            </span>
-                          </summary>
-
-                          <div className="grid grid-cols-1 gap-3 mt-3">
-                            {detectorJobs.length === 0 && (
-                              <p className="text-sm" style={{ color: "rgba(255,255,255,0.34)" }}>
-                                No matching detector jobs right now.
-                              </p>
-                            )}
-                            {detectorJobs.map((job) => (
-                              <DetectorJobCard key={job.jobId} job={job} />
-                            ))}
-                          </div>
-                        </details>
-                      </div>
-                    </div>
-                  </details>
-                </section>
               </div>
             )}
 
@@ -3085,6 +3138,17 @@ export default function RecordingPage() {
                     recording={recording}
                     busyAction={busyActionById[String(recording.id)]}
                     analysisSummary={analysisSummaryById[String(recording.id)]}
+                    aiStatus={getRecordingAiStatus(recording, allRecordingAnalysisJobs)}
+                    analysisJobs={allRecordingAnalysisJobs
+                      .filter((job) => job.recordingDetailId === recording.id)
+                      .sort((left, right) => {
+                        const leftTime = new Date(left.createdAt).getTime();
+                        const rightTime = new Date(right.createdAt).getTime();
+                        return rightTime - leftTime;
+                      })}
+                    analysisLoading={jobsLoading}
+                    analysisError={jobsError}
+                    jobRefreshLoadingById={jobRefreshLoadingById}
                     selectedClassesCount={selectedClasses.length}
                     canDelete={
                       currentUserId != null && recording.createdByUserId === currentUserId
@@ -3093,6 +3157,8 @@ export default function RecordingPage() {
                     onDownload={handleDownload}
                     onAnalyze={handleAnalyze}
                     onDelete={handleRequestDelete}
+                    onRefreshAnalysisJob={refreshAnalysisJob}
+                    onOpenClassPreview={openClassPreview}
                   />
                 ))}
               </div>
@@ -3130,6 +3196,11 @@ export default function RecordingPage() {
           preview={classPreview}
           onClose={resetClassPreview}
           onSelectMoment={selectClassPreviewMoment}
+          onNotifyViolation={handleNotifyViolation}
+          notificationLoadingByKey={notificationLoadingByKey}
+          notificationStateByKey={notificationStateByKey}
+          onOpenSignedDownload={handleOpenSignedDownload}
+          onCopySignedDownload={handleCopySignedDownload}
         />
       )}
     </>

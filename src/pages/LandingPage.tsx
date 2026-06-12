@@ -199,7 +199,7 @@ export default function LandingPage() {
       navigate("/dashboard");
     } catch {
       setStatus("error");
-      setToast("Login failed, please try again");
+      setToast("Unable to verify these credentials. Please try again.");
     }
   }
 
@@ -242,14 +242,8 @@ export default function LandingPage() {
           animation-delay: 0.28s;
         }
 
-        .anim-forgot {
-          animation: fadeSlideUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
-          animation-delay: 0.36s;
-        }
-
         .login-btn,
-        .ghost-chip,
-        .top-pill {
+        .ghost-chip {
           transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.2s ease;
         }
 
@@ -267,23 +261,13 @@ export default function LandingPage() {
           cursor: not-allowed;
         }
 
-        .ghost-chip:hover,
-        .top-pill:hover {
+        .ghost-chip:hover {
           transform: translateY(-2px);
           box-shadow: 0 14px 28px rgba(2, 8, 22, 0.24);
         }
 
-        .ghost-chip:active,
-        .top-pill:active {
+        .ghost-chip:active {
           transform: translateY(1px);
-        }
-
-        .forgot-link {
-          transition: color 0.2s ease;
-        }
-
-        .forgot-link:hover {
-          color: rgba(255, 255, 255, 0.78);
         }
 
         .spin-ring {
@@ -313,17 +297,6 @@ export default function LandingPage() {
 
       <div className="relative min-h-screen w-full overflow-hidden" style={recordingThemePageStyle}>
         <RecordingThemeBackdrop />
-
-        <div className="absolute right-5 top-5 z-20">
-          <button
-            type="button"
-            onClick={() => navigate("/signup")}
-            className="top-pill rounded-xl px-5 py-2.5 text-sm font-medium"
-            style={{ ...recordingThemePillButtonStyle, cursor: "pointer" }}
-          >
-            Sign Up
-          </button>
-        </div>
 
         {toast && (
           <div
@@ -369,17 +342,17 @@ export default function LandingPage() {
                   color: "#90caff",
                 }}
               >
-                Live meetings, recordings, and AI review
+                Secure operations workspace
               </div>
               <h1 className="mt-5 text-4xl font-semibold leading-tight text-white sm:text-5xl">
-                One calmer place to run every meeting room.
+                Sign in to manage SixDX rooms and safety review.
               </h1>
               <p className="mt-4 max-w-xl text-base leading-7" style={recordingThemeMutedTextStyle}>
-                Sign in to start rooms, manage participants, review recordings, and trigger safety
-                analysis without jumping between different tools.
+                Access meeting rooms, recordings, and HSE audit analysis from a single controlled
+                workspace.
               </p>
               <div className="mt-8 flex flex-wrap gap-3">
-                {["Fast room access", "Recording review", "AI analysis jobs"].map((item) => (
+                {["Room operations", "Recording review", "HSE audit analysis"].map((item) => (
                   <div
                     key={item}
                     className="ghost-chip rounded-full px-4 py-2 text-sm"
@@ -397,9 +370,9 @@ export default function LandingPage() {
             >
               <img src="/SixDX White.svg" alt="SixDX" style={{ height: 34 }} />
               <div className="mt-8">
-                <h2 className="text-2xl font-semibold text-white">Welcome back</h2>
+                <h2 className="text-2xl font-semibold text-white">Authorized access</h2>
                 <p className="mt-2 text-sm leading-6" style={recordingThemeSubtleTextStyle}>
-                  Use your identifier and password to get back into your workspace.
+                  Enter your assigned identifier and password to continue.
                 </p>
               </div>
 
@@ -445,27 +418,8 @@ export default function LandingPage() {
                         <span>Signing in...</span>
                       </>
                     ) : (
-                      "Log in"
+                      "Sign in"
                     )}
-                  </button>
-                </div>
-
-                <div className={`mt-4 ${mounted ? "anim-forgot" : "opacity-0"}`}>
-                  <button
-                    type="button"
-                    className="forgot-link text-left text-xs"
-                    style={{
-                      background: "none",
-                      border: "none",
-                      color: "rgba(255,255,255,0.48)",
-                      cursor: "pointer",
-                      padding: 0,
-                    }}
-                    onClick={() => {
-                      // Placeholder for future password reset flow.
-                    }}
-                  >
-                    Forgot password?
                   </button>
                 </div>
               </form>
