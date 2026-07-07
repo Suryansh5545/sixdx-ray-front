@@ -64,32 +64,50 @@ function VideoGrid({
   if (effectiveLayout === "spotlight" && pinned) {
     return (
       <div
-        className={`flex flex-col gap-3 w-full h-full ${className}`}
+        className={`flex flex-col gap-3 w-full h-full min-w-0 overflow-hidden ${className}`}
         style={{ minHeight: 0 }}
       >
         {/* Main pinned tile */}
-        <div className="flex-1 min-h-0">
+        <div className="flex flex-1 items-center justify-center overflow-hidden min-h-0 min-w-0">
           <VideoTile
             participant={pinned}
             isPinned
             onPin={handlePin}
-            className="w-full h-full"
-            style={{ height: "100%" }}
+            className="h-full max-h-full max-w-full"
+            style={{
+              width: "auto",
+              height: "100%",
+              aspectRatio: "16 / 9",
+            }}
           />
         </div>
 
         {/* Strip of remaining participants */}
         {rest.length > 0 && (
           <div
-            className="flex gap-2 overflow-x-auto pb-1"
-            style={{ height: 90, flexShrink: 0 }}
+            className="flex items-center gap-2 overflow-x-auto"
+            style={{
+              minHeight: 110,
+              height: 110,
+              flexShrink: 0,
+              padding: "8px 10px",
+              borderRadius: 18,
+              background: "rgba(5,10,25,0.42)",
+              border: "1px solid rgba(255,255,255,0.06)",
+            }}
           >
             {rest.map((p) => (
               <VideoTile
                 key={p.id}
                 participant={p}
                 onPin={handlePin}
-                style={{ width: 144, minWidth: 144, height: 90 }}
+                className="flex-shrink-0"
+                style={{
+                  width: 168,
+                  minWidth: 168,
+                  height: 94,
+                  aspectRatio: "16 / 9",
+                }}
               />
             ))}
           </div>
