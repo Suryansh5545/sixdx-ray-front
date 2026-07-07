@@ -52,6 +52,8 @@ function VideoTile({
 }: VideoTileProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [hovered, setHovered] = useState(false);
+  const hasExplicitHeight = style?.height !== undefined;
+  const hasExplicitAspectRatio = style?.aspectRatio !== undefined;
 
   // Attach MediaStream to <video> whenever it changes
   useEffect(() => {
@@ -64,7 +66,7 @@ function VideoTile({
 
   return (
     <div
-      className={`relative overflow-hidden rounded-2xl select-none min-h-0 ${className}`}
+      className={`relative w-full overflow-hidden rounded-2xl select-none min-h-0 min-w-0 ${className}`}
       style={{
         background: "linear-gradient(135deg, #0d1a3a 0%, #091228 100%)",
         border: participant.isSpeaking
@@ -76,7 +78,7 @@ function VideoTile({
           ? "0 0 0 3px rgba(79,179,255,0.2), 0 8px 32px rgba(0,30,120,0.5)"
           : "0 4px 24px rgba(0,10,60,0.4)",
         transition: "border-color 0.2s ease, box-shadow 0.2s ease",
-        aspectRatio: "16 / 9",
+        aspectRatio: hasExplicitHeight && !hasExplicitAspectRatio ? undefined : "16 / 9",
         minHeight: 0,
         ...style,
       }}

@@ -163,7 +163,8 @@ function VideoGrid({
           participant={p}
           onPin={handlePin}
           isPinned={pinnedId === p.id}
-          className="h-full min-h-0"
+          className="h-full min-h-0 min-w-0"
+          style={{ height: "100%" }}
         />
       ))}
     </div>
